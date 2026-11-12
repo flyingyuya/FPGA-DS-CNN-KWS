@@ -1,0 +1,21 @@
+# python
+.venv/
+__pycache__/
+software/__pycache__/
+
+# 模型训练产生
+software/data/
+software/artifacts/
+
+# 编辑器
+.vscode/
+*.swp
+
+# iverilog
+*.vvp
+*.vcd
+
+# xsim
+sim/build/
+
+docs/
