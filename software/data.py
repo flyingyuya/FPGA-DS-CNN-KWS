@@ -281,8 +281,8 @@ class FeaturePipeline(nn.Module):
     def forward(self, wav16, train=False):
         x = wav16.float() / 32768.0
         if train:
-            x = self._augment(x)
-        f = normalise(self.mfcc(x), self.mean, self.std)
+            x = self._augment(x)                            # B, 16000
+        f = normalise(self.mfcc(x), self.mean, self.std)    # B, 40, 101
         if train and SPEC_AUG:
             f = self._spec_augment(f)
         return f.unsqueeze(1)

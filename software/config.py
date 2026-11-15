@@ -21,6 +21,19 @@ ACT_QMAX = (1 << ACT_BITS) - 1
 PRECISION = f"int{W_BITS}"
 
 # -----------------------------------------------------------------------------
+# Hardware numeric contract (see docs/quantisation-math.md)
+# -----------------------------------------------------------------------------
+# The accelerator has no requantisation multiplier: every layer's output is
+# produced by a per-channel arithmetic right shift.  That is only possible when
+#     weight_step[oc] * s_in / s_out == 2**-shift[oc]
+# i.e. weight_step[oc] = rho * 2**-shift[oc] with ONE free real constant rho per
+# layer.  quantisation.py enforces exactly this; nothing else in the design may.
+SHIFT_MAX = 15                      # shift is a 4-bit field in the RTL
+ACC_BITS = 24                       # signed accumulator / bias width
+GAP_SHIFT = 6                       # GAP: sum >>> 6, so s_gap = s_in * 64/65
+LOGIT_SCALE = 1.0 / 16.0            # FC output LSB (argmax invariant, so it is free)
+
+# -----------------------------------------------------------------------------
 # Paths
 # -----------------------------------------------------------------------------
 # __file__ is undefined inside the notebook, which must be started from software/
