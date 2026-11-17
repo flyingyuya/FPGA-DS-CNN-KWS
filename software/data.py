@@ -27,7 +27,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 
-from config import (ARTIFACTS, BG_NOISE_PROB, BG_NOISE_VOL, CACHE_DIR,
+from config import (N_FRAMES_USED,ARTIFACTS, BG_NOISE_PROB, BG_NOISE_VOL, CACHE_DIR,
                     CLIP_SAMPLES, DATA_ROOT, LABELS, NUM_CLASSES, SAMPLE_RATE,
                     GSCD_DIR, GSCD_URL, SEED, SILENCE_IDX, SILENCE_PCT, SPEC_AUG,
                     TIME_SHIFT_MS, UNKNOWN_IDX, UNKNOWN_PCT, WANTED_WORDS)
@@ -283,6 +283,9 @@ class FeaturePipeline(nn.Module):
         if train:
             x = self._augment(x)                            # B, 16000
         f = normalise(self.mfcc(x), self.mean, self.std)    # B, 40, 101
+        if N_FRAMES_USED < f.shape[2]:                      # centred context crop
+            off = (f.shape[2] - N_FRAMES_USED) // 2
+            f = f[:, :, off:off + N_FRAMES_USED]
         if train and SPEC_AUG:
             f = self._spec_augment(f)
         return f.unsqueeze(1)

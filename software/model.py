@@ -3,8 +3,8 @@
     input  1 x 40 x 101 (UINT8 MFCC codes in hardware)
     stem   3x3 conv, 32 ch, stride 2      -> 32 x 20 x 51
     dw1    3x3 depthwise, stride 2        -> 32 x 10 x 26
-    pw1    1x1 conv, 48 ch                -> 48 x 10 x 26
-    dw2    3x3 depthwise, stride 2        -> 48 x  5 x 13
+    pw1    1x1 conv, 32 ch                -> 32 x 10 x 26
+    dw2    3x3 depthwise, stride 2        -> 32 x  5 x 13
     pw2    1x1 conv, 64 ch                -> 64 x  5 x 13
     dw3/pw3, dw4/pw4  (stride 1, 64 ch)   -> 64 x  5 x 13
     gap    global average pool            -> 64
@@ -22,13 +22,13 @@ import torch.nn.functional as F
 
 from config import DROPOUT, NUM_CLASSES
 
-# (name, kind, cin, cout, stride) -- must equal LAYERS in sim/tb/reference_model.py
+# (name, kind, cin, cout, stride) -- must equal LAYERS in sim/reference_model.py
 LAYER_SPEC = [
     ("stem", "std", 1, 32, 2),
     ("dw1", "dw", 32, 32, 2),
-    ("pw1", "pw", 32, 48, 1),
-    ("dw2", "dw", 48, 48, 2),
-    ("pw2", "pw", 48, 64, 1),
+    ("pw1", "pw", 32, 32, 1),
+    ("dw2", "dw", 32, 32, 2),
+    ("pw2", "pw", 32, 64, 1),
     ("dw3", "dw", 64, 64, 1),
     ("pw3", "pw", 64, 64, 1),
     ("dw4", "dw", 64, 64, 1),

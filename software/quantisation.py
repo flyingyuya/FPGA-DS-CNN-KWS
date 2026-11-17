@@ -363,7 +363,7 @@ class QDSCNN(nn.Module):
 
     @torch.no_grad()
     def float_params(self):
-        """FP32 BN-folded parameters in the shapes tb/reference_model.py uses:
+        """FP32 BN-folded parameters in the shapes sim/reference_model.py uses:
         std/dw (cout, cin|1, 3, 3), pw/fc (cout, cin)."""
         prm = {}
         for n in CONV_NAMES + ["fc"]:
@@ -379,7 +379,7 @@ class QDSCNN(nn.Module):
         """Every constant the accelerator needs, in execution order.
 
         This is the single interface between the ML pipeline and the RTL:
-        int_model.py, export_mem.py and tb/reference_model.py must read the
+        int_model.py, export_mem.py and sim/reference_model.py must read the
         network ONLY through this dict, so all three are bit-identical.
 
             q     weight codes, W_QMAX-scaled integers in [-127, 127]

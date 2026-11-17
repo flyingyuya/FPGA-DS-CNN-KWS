@@ -77,7 +77,7 @@ class MFCC(nn.Module):
 # -----------------------------------------------------------------------------
 def input_qparams(lo=IN_CLIP_LO, hi=IN_CLIP_HI):
     """ Asymmetric UINT8 quantiser for the normalised MFCC map.  Same formula as
-    asym() in tb/reference_model.py, so the exporter reproduces it exactly.
+    asym() in sim/reference_model.py, so the exporter reproduces it exactly.
     """
 
     lo = min(lo, 0.0)

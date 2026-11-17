@@ -2,7 +2,7 @@
 
 Everything that has to agree with the hardware (layer table, bit widths,
 label order, MFCC geometry) is either defined here or imported from
-../tb/reference_model.py, which stays the single source of truth for the
+../sim/reference_model.py, which stays the single source of truth for the
 accelerator numerics.  The only line that differs between int4/ml and
 int8/ml is W_BITS.
 """
@@ -40,7 +40,7 @@ LOGIT_SCALE = 1.0 / 16.0            # FC output LSB (argmax invariant, so it is 
 ML_DIR = (os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals()
           else os.getcwd())
 VARIANT_ROOT = os.path.dirname(ML_DIR)                 # int4/ or int8/
-REFERENCE_MODEL = os.path.join(VARIANT_ROOT, "tb", "reference_model.py")
+REFERENCE_MODEL = os.path.join(VARIANT_ROOT, "sim", "reference_model.py")
 
 DATA_ROOT = os.environ.get("KWS_DATA_ROOT", os.path.join(ML_DIR, "data"))
 GSCD_URL = "http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
@@ -54,7 +54,7 @@ EXPORT_DIR = os.path.join(ARTIFACTS, "export")         # staging tree
 
 # -----------------------------------------------------------------------------
 # Dataset -- Google Speech Commands v0.02, 12-class task (Warden 2018)
-# Label order MUST match LABELS in tb/reference_model.py and golden.json.
+# Label order MUST match LABELS in sim/reference_model.py and golden.json.
 # -----------------------------------------------------------------------------
 LABELS = ["_silence_", "_unknown_", "yes", "no", "up", "down",
           "left", "right", "on", "off", "stop", "go"]
@@ -76,7 +76,18 @@ HOP_LENGTH = 160
 N_MELS = 40
 N_MFCC = 40
 F_MIN, F_MAX = 20.0, 7600.0
-H_IN, W_IN = N_MFCC, CLIP_SAMPLES // HOP_LENGTH + 1    # 40, 101
+# Context actually fed to the network, in MFCC frames.  The map is computed over
+# the whole 1 s clip and then cropped to the centred N_FRAMES_USED frames, so this
+# is the one knob that changes the accelerator's input width (and therefore the
+# activation-bank size).
+#
+# MEASURED, do not lower it casually: 50 frames (490 ms) costs 9 points of FP32
+# accuracy (94.31% -> 85.33%).  The bank would drop from 16 to 8 BRAM36 because
+# the stem output of a 40x50 input is 20x25 = 500 words <= 512, but that saving is
+# nowhere near worth the accuracy.  The 1 s context is what makes this model good;
+# it is also the reason the paper's smaller 48x40 input only reaches 90.46%.
+N_FRAMES_USED = CLIP_SAMPLES // HOP_LENGTH + 1         # 101 = full 1 s
+H_IN, W_IN = N_MFCC, N_FRAMES_USED                     # 40, 101
 
 # Input quantiser: after per-coefficient standardisation the feature map is
 # clipped to [IN_CLIP_LO, IN_CLIP_HI] sigma and mapped to UINT8 with one
