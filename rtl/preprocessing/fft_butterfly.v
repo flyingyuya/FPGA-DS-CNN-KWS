@@ -1,0 +1,130 @@
+//////////////////////////////////////////////////////////////////////////////////
+// Company:
+// Engineer:       Binyu Fei
+//
+// Create Date:    2026-10-26
+// Design Name:    fft_butterfly
+// Module Name:    fft_butterfly
+// Project Name:   音速并行（Sonic-Speed-Parallelism）
+// Target Devices: Xilinx Artix-7 XC7A100T-2FGG484I
+// Tool versions:  Vivado 2020.2 / iverilog 12 / Verilator 5.052 / Verible
+// Description:    fft_butterfly.v - FFT 蝶形运算单元（纯组合逻辑）
+// Dependencies:
+//
+// Revision:
+// Revision 0.01 - File Created
+//
+//////////////////////////////////////////////////////////////////////////////////
+`timescale 1ns/1ps
+
+
+module fft_butterfly #(
+    parameter integer DW = 24,          // 数据位宽 Q1.23
+    parameter integer TW = 16           // 旋转因子位宽 Q1.15
+) (
+    input  wire signed [DW-1:0] ar, ai, // a = x[p]
+    input  wire signed [DW-1:0] br, bi, // b = x[q]
+    input  wire signed [TW-1:0] wr, wi, // W = 旋转因子
+
+    output wire signed [DW-1:0] pr, pi, // x[p]' = (a + W·b) / 2
+    output wire signed [DW-1:0] qr, qi  // x[q]' = (a - W·b) / 2
+);
+
+    //=========================================================================
+    // 位宽推导
+    //=========================================================================
+    //   PW = DW+TW = 40   |a·b| ≤ 2^23 × 2^15 = 2^38
+    //   AW = PW+2  = 42   两个乘积相加减最坏 2^39，再留 1 位给舍入
+    //   SW = DW+1  = 25   蝶形的 a±t 幅度翻倍，必须多一位
+    localparam integer PW = DW + TW;        // 40
+    localparam integer AW = PW + 2;         // 42
+    localparam integer SW = DW + 1;         // 25
+
+    // 四舍五入偏置：右移 15 位 -> 加 2^14
+    localparam signed [AW-1:0] RND15 = {{(AW-1){1'b0}}, 1'b1} << (15-1);
+
+    // 饱和边界
+    localparam signed [DW-1:0] MAXV = {1'b0, {(DW-1){1'b1}}};   // +2^23-1
+    localparam signed [DW-1:0] MINV = {1'b1, {(DW-1){1'b0}}};   // -2^23
+
+    localparam signed [SW-1:0] ONE_SW = {{(SW-1){1'b0}}, 1'b1};
+
+    //-------------------------------------------------------------------------
+    // 第 1 步：复数乘法
+    //
+    //   W · b = (wr + j·wi)(br + j·bi)
+    //         = (wr·br − wi·bi)  +  j·(wr·bi + wi·br)
+    //             ─────┬─────         ─────┬─────
+    //                 实部                虚部
+    //
+    // 4 个实数乘法，Vivado 会推断成 4 个 DSP48E1（25×18 正好装下 24×16）
+    //-------------------------------------------------------------------------
+    wire signed [PW-1:0] p_rw  = br * wr;   // 40 bit
+    wire signed [PW-1:0] p_iw  = bi * wi;
+    wire signed [PW-1:0] p_iwr = bi * wr;
+    wire signed [PW-1:0] p_rwi = br * wi;
+
+    // 符号扩展到 AW 位再做加减（避免位宽不匹配导致的意外截断）
+    wire signed [AW-1:0] t_re_w = {{(AW-PW){p_rw[PW-1]}},  p_rw}
+                                - {{(AW-PW){p_iw[PW-1]}},  p_iw};
+    wire signed [AW-1:0] t_im_w = {{(AW-PW){p_iwr[PW-1]}}, p_iwr}
+                                + {{(AW-PW){p_rwi[PW-1]}}, p_rwi};
+
+    //-------------------------------------------------------------------------
+    // 第 2 步：归一化 + 饱和
+    //
+    //   乘积的标度是 Q1.23 × Q1.15 = Q?.38，要变回 Q1.23 需要右移 15 位
+    //   右移前加 2^14 实现"四舍五入"（不加就是截断，会引入直流偏置）
+    //
+    //   >>> 是算术右移（对负数向下取整），和 Python 的 >> 语义一致
+    //-------------------------------------------------------------------------
+    wire signed [AW-1:0] t_re_r = t_re_w + RND15;
+    wire signed [AW-1:0] t_im_r = t_im_w + RND15;
+    wire signed [AW-1:0] t_re_s = t_re_r >>> 15;
+    wire signed [AW-1:0] t_im_s = t_im_r >>> 15;
+
+    function signed [DW-1:0] sat;
+        input signed [63:0] v;              // 用足够宽的输入，调用时自动符号扩展
+        begin
+            if      (v > MAXV) sat = MAXV;
+            else if (v < MINV) sat = MINV;
+            else               sat = v[DW-1:0];
+        end
+    endfunction
+
+    wire signed [DW-1:0] t_re = sat(t_re_s);
+    wire signed [DW-1:0] t_im = sat(t_im_s);
+
+    //-------------------------------------------------------------------------
+    // 第 3 步：蝶形的加/减
+    //
+    //   a ± t 幅度可能翻倍 -> 先扩到 25 bit 再算
+    //-------------------------------------------------------------------------
+    wire signed [SW-1:0] sum_re = {{(SW-DW){ar[DW-1]}}, ar} + {{(SW-DW){t_re[DW-1]}}, t_re};
+    wire signed [SW-1:0] sum_im = {{(SW-DW){ai[DW-1]}}, ai} + {{(SW-DW){t_im[DW-1]}}, t_im};
+    wire signed [SW-1:0] dif_re = {{(SW-DW){ar[DW-1]}}, ar} - {{(SW-DW){t_re[DW-1]}}, t_re};
+    wire signed [SW-1:0] dif_im = {{(SW-DW){ai[DW-1]}}, ai} - {{(SW-DW){t_im[DW-1]}}, t_im};
+
+    //-------------------------------------------------------------------------
+    // 第 4 步：每级 ÷2（FFT 的防溢出缩放）
+    //
+    //   为什么要 ÷2：
+    //     蝶形会让幅度翻倍，10 级下来最多增长 2^10 = 1024
+    //     每级 ÷2，10 级共 ÷1024 = ÷N
+    //   为什么 ÷N 不是浪费精度：
+    //     满量程正弦 A=1.0 的峰值 bin 是 512·A = 512，÷1024 后正好是 0.5，
+    //     恰好落在 Q1.23 的可用范围中央
+    //
+    //   加 1 再右移 = 四舍五入（避免每级 -0.5 LSB 的截断偏置累积成直流）
+    //-------------------------------------------------------------------------
+    wire signed [SW-1:0] sum_re_r = sum_re + ONE_SW;
+    wire signed [SW-1:0] sum_im_r = sum_im + ONE_SW;
+    wire signed [SW-1:0] dif_re_r = dif_re + ONE_SW;
+    wire signed [SW-1:0] dif_im_r = dif_im + ONE_SW;
+
+    assign pr = sat(sum_re_r >>> 1);
+    assign pi = sat(sum_im_r >>> 1);
+    assign qr = sat(dif_re_r >>> 1);
+    assign qi = sat(dif_im_r >>> 1);
+
+endmodule

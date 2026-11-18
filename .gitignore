@@ -3,6 +3,7 @@
 software/__pycache__/
 sim/__pycache__/
 sim/tb/__pycache__/
+scripts/golden/__pycache__/
 
 # 模型训练产生
 software/data/

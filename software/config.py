@@ -84,8 +84,7 @@ F_MIN, F_MAX = 20.0, 7600.0
 # MEASURED, do not lower it casually: 50 frames (490 ms) costs 9 points of FP32
 # accuracy (94.31% -> 85.33%).  The bank would drop from 16 to 8 BRAM36 because
 # the stem output of a 40x50 input is 20x25 = 500 words <= 512, but that saving is
-# nowhere near worth the accuracy.  The 1 s context is what makes this model good;
-# it is also the reason the paper's smaller 48x40 input only reaches 90.46%.
+# nowhere near worth the accuracy.
 N_FRAMES_USED = CLIP_SAMPLES // HOP_LENGTH + 1         # 101 = full 1 s
 H_IN, W_IN = N_MFCC, N_FRAMES_USED                     # 40, 101
 
