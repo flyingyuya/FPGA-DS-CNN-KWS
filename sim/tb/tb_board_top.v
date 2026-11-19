@@ -192,10 +192,13 @@ module tb_board_top;
         end
         $display("  UART: %0d bytes after %0d clocks: %02x %02x %02x",
                  nrx, t, rx[0], rx[1], rx[2]);
-        if (nrx >= 3 && rx[0] === 8'hA5 && rx[1] === 8'h01)
-            $display("BOARD_TOP: PASS ('yes' classified as class 1, margin %0d)", rx[2]);
+        // NOTE: the model's class order is 0=silence 1=unknown 2=yes 3=no ...,
+        // so the 'yes' clip must come out as class 2 (the golden file name
+        // "1_yes.mem" refers to the dataset label, not the model's class index).
+        if (nrx >= 3 && rx[0] === 8'hA5 && rx[1] === 8'h02)
+            $display("BOARD_TOP: PASS ('yes' -> class 2, margin %0d)", rx[2]);
         else
-            $display("BOARD_TOP: FAIL (expected A5 01 xx for the 'yes' clip)");
+            $display("BOARD_TOP: FAIL (expected A5 02 xx for the 'yes' clip, got %02x %02x)", rx[0], rx[1]);
         $finish;
     end
 

@@ -33,12 +33,11 @@ module tb_mfcc_top;
     wire [11:0] mfcc_addr;
     wire [7:0]  mfcc_data;
     wire [31:0] cycles_o;
+    wire        dbg_we;
+    wire [1:0]  dbg_stage;
+    wire [11:0] dbg_addr;
+    wire [47:0] dbg_data;
     wire [7:0]  frame_o;
-    wire        dbg_taken, dbg_taken2;
-    wire [47:0] dbg_pw0;
-    wire [53:0] dbg_mel0;
-    wire [15:0] dbg_log0;
-    wire [23:0] dbg_dct0;
 
     mfcc_top #(.NSAMP(NSAMP), .NFRAME(NFRAME), .SKIP_LOAD(1)) u_mfcc (
         .clk(clk), .rst_n(rst_n),
@@ -46,7 +45,7 @@ module tb_mfcc_top;
         .start(start), .busy(busy), .done(done),
         .mfcc_we(mfcc_we), .mfcc_addr(mfcc_addr), .mfcc_data(mfcc_data),
         .cycles_o(cycles_o), .frame_o(frame_o),
-        .dbg_taken(dbg_taken), .dbg_taken2(dbg_taken2), .dbg_pw0(dbg_pw0), .dbg_mel0(dbg_mel0), .dbg_log0(dbg_log0), .dbg_dct0(dbg_dct0));
+        .dbg_we(dbg_we), .dbg_stage(dbg_stage), .dbg_addr(dbg_addr), .dbg_data(dbg_data));
 
     reg [8*24-1:0] names [0:NVEC-1];
     reg [7:0]      exp_mem [0:NCODE-1];
@@ -54,12 +53,36 @@ module tb_mfcc_top;
     reg [8*64-1:0] path;
 
     integer errors = 0, i, v, nwrite, dd, d1, dbig, dmax;
-    integer errors_total = 0, firstbad, f0bad, fbad;
+    integer errors_total = 0, firstbad, f0bad, fbad, nfbig;
 
     // (a hierarchical probe of the mel engine's power buffer reads X under
     //  iverilog even though the engine consumes it -- the useful diagnostic is the
     //  |d| histogram below, plus comparing intermediate stage dumps from
     //  scripts/golden/mfcc_ref.py)
+
+    // race-free trace: register everything, then print one cycle later
+    reg        ff_we_d;
+    reg [9:0]  t_idx_d;
+    reg [13:0] ridx_d;
+    reg signed [15:0] samp_q_d, wprod_d;
+    reg [7:0]  frame_d;
+    always @(posedge clk) begin
+        ff_we_d  <= u_mfcc.fft_we;
+        t_idx_d  <= u_mfcc.t_idx;
+        ridx_d   <= u_mfcc.ridx;
+        samp_q_d <= u_mfcc.samp_q;
+        wprod_d  <= u_mfcc.wprod;
+        frame_d  <= u_mfcc.frame;
+    end
+    always @(posedge clk) begin
+        if (rst_n && v == 0 && ff_we_d && frame_d == 8'd1 && t_idx_d < 10'd4)
+            $display("    trc f=%0d t=%0d ridx=%0d sampq=%0d wprod=%0d",
+                     frame_d, t_idx_d, ridx_d, samp_q_d, wprod_d);
+    end
+
+    integer fd;
+    always @(posedge clk) if (rst_n && dbg_we)
+        $fwrite(fd, "%0d %0d %0h\n", dbg_stage, dbg_addr, dbg_data);
 
     always @(posedge clk) begin
         if (rst_n && mfcc_we) begin
@@ -85,7 +108,7 @@ module tb_mfcc_top;
             while (!done) @(negedge clk);
             @(negedge clk);
 
-            errors = 0; d1 = 0; dbig = 0; dmax = 0; firstbad = -1; f0bad = 0; fbad = 0;
+            errors = 0; d1 = 0; dbig = 0; dmax = 0; firstbad = -1; f0bad = 0; fbad = 0; nfbig = 0;
             for (i = 0; i < NCODE; i = i + 1)
                 if (got_mem[i] !== exp_mem[i]) begin
                     errors = errors + 1;
@@ -94,14 +117,13 @@ module tb_mfcc_top;
                     if (dd > dmax) dmax = dd;
                     if (dd == 1) d1 = d1 + 1; else dbig = dbig + 1;
                     if (firstbad < 0) firstbad = i;
-                    if (i % NFRAME == 0) f0bad = f0bad + 1; else fbad = fbad + 1;
+                    if (i % NFRAME == 0) f0bad = f0bad + 1;
+                    else begin fbad = fbad + 1; if (dd > 1) nfbig = nfbig + 1; end
                 end
 
-            if ($test$plusargs("dump") && vi == 0)
-                $display("    fft_pow[0]=%012x fft_pow[1]=%012x  pw_mem[0][15:0]=%04x  dct0=%0d",
-                         dbg_pw0, dbg_mel0[47:0], dbg_log0, $signed(dbg_dct0));
             $display("  %-10s %0d writes, %0d cycles; mismatches %0d (|d|=1 %0d, |d|>1 %0d, max %0d)",
                      names[vi], nwrite, cycles_o, errors, d1, dbig, dmax);
+            $display("             frames 1..100: %0d bad, of which |d|>1: %0d", fbad, nfbig);
             $display("             first bad addr %0d (c%0d f%0d); frame0 bad %0d, frames1..100 bad %0d",
                      firstbad, (firstbad < 0) ? 0 : firstbad / NFRAME,
                      (firstbad < 0) ? 0 : firstbad % NFRAME, f0bad, fbad);
@@ -126,10 +148,12 @@ module tb_mfcc_top;
             $dumpfile("sim/build/tb_mfcc.vcd");
             $dumpvars(0, tb_mfcc_top);
         end
+        fd = $fopen("sim/build/mfcc_stage.txt", "w");
         repeat (3) @(negedge clk);
         rst_n = 1'b1;
         @(negedge clk);
         for (v = 0; v < NVEC; v = v + 1) run_vector(v);
+        $fclose(fd);
         if (errors_total == 0)
             $display("MFCC_TOP: %0d clips x %0d codes bit-exact", NVEC, NCODE);
         else

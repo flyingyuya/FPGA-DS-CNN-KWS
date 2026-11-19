@@ -61,6 +61,16 @@ module mfcc_top #(
     // ---- observability -----------------------------------------------------
     output reg  [31:0]         cycles_o,
     output reg  [7:0]          frame_o,
+
+    // ---- debug: every stage's output for frame 0, one value per write ------
+    // Added after several rounds of single-value probing proved useless for
+    // locating a 26%-of-codes +-1..3 residue: the only reliable way is a whole
+    // frame at every stage.  stage 0 = fft power (256), 1 = mel (40),
+    // 2 = log (40), 3 = dct (40).
+    output reg                 dbg_we,
+    output reg  [1:0]          dbg_stage,
+    output reg  [11:0]         dbg_addr,
+    output reg  [47:0]         dbg_data,
     // stage snapshots for frame 0 (comparison against sim/reference_model's
     // intermediate values; a testbench cannot read the nested power buffer
     // reliably under iverilog)
@@ -98,7 +108,10 @@ module mfcc_top #(
     // =========================================================================
     (* ram_style = "block" *) reg signed [15:0] samp [0:NSAMP-1];
     reg [13:0]        wr_ptr;
-    reg               samp_re;
+    // samp_re MUST be combinational: as a register it is high during S_WB, by
+    // which time t_idx has already advanced, so samp_q ended up holding
+    // samp[ridx(t+1)] -- a whole frame shifted by one sample.
+    wire              samp_re = (state == S_WA);
     reg signed [15:0] samp_q;
 
     always @(posedge clk) begin
@@ -110,7 +123,9 @@ module mfcc_top #(
     // =========================================================================
     // window ROM and the normalisation ROM (combinational reads)
     // =========================================================================
-    reg  [8:0]  win_addr;
+    wire [8:0]  win_addr = t_idx[8:0];   // combinational: the ROM is a comb read
+                                        // and registered addresses have burned this
+                                        // project six times
     wire [15:0] win_q;
     window_rom u_win (.addr(win_addr), .dout(win_q));
 
@@ -209,13 +224,48 @@ module mfcc_top #(
         end
     end
 
+    // ---------------------------------------------------------------------
+    // DEBUG ONLY: shadow copy of the power bins + a post-hoc dump.
+    //
+    // Live probing of fft_pow / mel_data from a neighbouring always block kept
+    // reading X (three separate rounds of it), so instead of sampling a stream
+    // we keep a copy and walk it with a counter afterwards.  No valid/data
+    // alignment, no "new value or old value" question.
+    // Remove this block (and the shadow memory, ~1.5 BRAM) before tape-out.
+    // ---------------------------------------------------------------------
+    (* ram_style = "block" *) reg [47:0] pw_shadow [0:NFFT/2-1];
+    always @(posedge clk) if (fft_valid) pw_shadow[fft_idx] <= fft_pow;
+
+    reg        dmp_go;
+    reg [8:0]  dmp_cnt;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dbg_we <= 1'b0; dbg_stage <= 2'd0; dbg_addr <= 12'd0; dbg_data <= 48'd0;
+            dmp_go <= 1'b0; dmp_cnt <= 9'd0;
+        end else begin
+            dbg_we <= 1'b0;
+            if (frame == 8'd1 && mel_start) begin
+                dmp_go  <= 1'b1;              // frame 0's mel has just been kicked off
+                dmp_cnt <= 9'd0;
+            end else if (dmp_go) begin
+                dbg_we    <= 1'b1;
+                dbg_stage <= 2'd0;
+                dbg_addr  <= {4'd0, dmp_cnt[7:0]};
+                dbg_data  <= pw_shadow[dmp_cnt[7:0]];
+                dmp_cnt   <= dmp_cnt + 9'd1;
+                if (dmp_cnt == NFFT/2 - 1) dmp_go <= 1'b0;
+            end
+        end
+    end
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= S_IDLE; busy <= 1'b0; done <= 1'b0; buf_ready <= 1'b0;
             frame <= 8'd0; t_idx <= 10'd0; n_idx <= 6'd0; bins <= 9'd0;
             wr_ptr <= 14'd0; cyc <= 32'd0;
-            samp_re <= 1'b0; fft_we <= 1'b0; fft_in <= 24'sd0;
-            win_addr <= 9'd0; mel_start <= 1'b0;
+            fft_we <= 1'b0; fft_in <= 24'sd0;
+            mel_start <= 1'b0;
             log_we <= 1'b0; log_mel <= 54'd0;
             dct_log_we <= 1'b0; dct_log_addr <= 6'd0; dct_start <= 1'b0;
             norm_addr <= 6'd0; p_data <= 24'sd0; p_idx <= 6'd0; p_valid <= 1'b0;
@@ -223,7 +273,6 @@ module mfcc_top #(
             cycles_o <= 32'd0; frame_o <= 8'd0;
         end else begin
             done      <= 1'b0;
-            samp_re   <= 1'b0;
             fft_we    <= 1'b0;
             mel_start <= 1'b0;
             log_we    <= 1'b0;
@@ -258,8 +307,6 @@ module mfcc_top #(
             // issue the sample read and the window address for tap t_idx
             S_WA: begin
                 frame_o  <= frame;
-                samp_re  <= 1'b1;
-                win_addr <= t_idx[8:0];
                 state    <= S_WB;
             end
 
