@@ -73,6 +73,48 @@ run_dct() {
     vvp sim/build/tb.vvp
 }
 
+wm_src=(rtl/wm8960/i2c_bit_shift.v rtl/wm8960/i2c_control.v
+        rtl/wm8960/WM8960_init_table.v rtl/wm8960/WM8960_init.v
+        sim/tb/tb_wm8960_init.v)
+
+run_wm() {
+    echo "=== tb_wm8960_init ==="
+    iverilog "${iverilog_flags[@]}" -I rtl/wm8960 "${wm_src[@]}"
+    vvp sim/build/tb.vvp
+}
+
+board_src=(-DSIM -I rtl -I rtl/cnn -I rtl/memory -I rtl/common
+           -I rtl/preprocessing -I rtl/wm8960
+           rtl/board_top.v rtl/common/clk_gen.v rtl/common/uart_tx.v
+           rtl/common/i2s_rx.v rtl/common/audio_fifo.v
+           rtl/wm8960/i2c_bit_shift.v rtl/wm8960/i2c_control.v
+           rtl/wm8960/WM8960_init_table.v rtl/wm8960/WM8960_init.v
+           rtl/preprocessing/fft_core.v rtl/preprocessing/fft_addr_gen.v
+           rtl/preprocessing/fft_butterfly.v rtl/preprocessing/fft_twiddle_rom.v
+           rtl/preprocessing/mel_fb.v rtl/preprocessing/mel_rom.v
+           rtl/preprocessing/log_q8.v rtl/preprocessing/log_lut.v
+           rtl/preprocessing/dct40.v rtl/preprocessing/mfcc_roms.v
+           rtl/preprocessing/mfcc_top.v
+           rtl/cnn/accelerator_top.v rtl/cnn/layer_cfg.v rtl/cnn/mac_lane.v
+           rtl/cnn/pe_array.v rtl/cnn/conv_engine.v rtl/cnn/argmax_tree.v
+           rtl/memory/act_bank.v rtl/memory/weight_rom.v
+           rtl/memory/const_loader.v rtl/memory/fmem.v
+           sim/tb/tb_board_top.v)
+
+run_board() {
+    echo "=== tb_board_top ==="
+    iverilog "${iverilog_flags[@]}" "${board_src[@]}"
+    vvp sim/build/tb.vvp
+}
+
+i2s_src=(rtl/common/i2s_rx.v sim/tb/tb_i2s_rx.v)
+
+run_i2s() {
+    echo "=== tb_i2s_rx ==="
+    iverilog "${iverilog_flags[@]}" "${i2s_src[@]}"
+    vvp sim/build/tb.vvp
+}
+
 mfcc_src=(rtl/preprocessing/mfcc_top.v rtl/preprocessing/mfcc_roms.v
           rtl/preprocessing/fft_core.v rtl/preprocessing/fft_addr_gen.v
           rtl/preprocessing/fft_butterfly.v rtl/preprocessing/fft_twiddle_rom.v
@@ -105,7 +147,10 @@ case "${1:-all}" in
     mel)   run_mel ;;
     log)   run_log ;;
     dct)   run_dct ;;
+    wm)    run_wm ;;
+    board) run_board ;;
+    i2s)   run_i2s ;;
     mfcc)  run_mfcc ;;
-    all)   run_pe; run_conv; run_top; run_fft; run_mel; run_log; run_dct; run_mfcc ;;
-    *)   echo "usage: bash sim/run.sh [all|pe|conv|top|fft|mel|log|dct|mfcc]   (tb_*.v live in sim/)"; exit 1 ;;
+    all)   run_pe; run_conv; run_top; run_fft; run_mel; run_log; run_dct; run_i2s; run_wm; run_mfcc ;;
+    *)   echo "usage: bash sim/run.sh [all|pe|conv|top|fft|mel|log|dct|i2s|mfcc]   (tb_*.v live in sim/)"; exit 1 ;;
 esac

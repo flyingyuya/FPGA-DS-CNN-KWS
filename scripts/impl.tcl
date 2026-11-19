@@ -10,7 +10,7 @@ set part   xc7a100tfgg484-2
 set outdir report
 file mkdir $outdir
 
-set_property include_dirs [list rtl] [current_fileset]
+set_property include_dirs [list rtl rtl/wm8960 rtl/preprocessing] [current_fileset]
 
 read_verilog [list \
     rtl/board_top.v \
@@ -26,6 +26,23 @@ read_verilog [list \
     rtl/memory/weight_rom.v \
     rtl/memory/const_loader.v \
     rtl/memory/fmem.v \
+    rtl/common/i2s_rx.v \
+    rtl/common/audio_fifo.v \
+    rtl/wm8960/i2c_bit_shift.v \
+    rtl/wm8960/i2c_control.v \
+    rtl/wm8960/WM8960_init_table.v \
+    rtl/wm8960/WM8960_init.v \
+    rtl/preprocessing/fft_core.v \
+    rtl/preprocessing/fft_addr_gen.v \
+    rtl/preprocessing/fft_butterfly.v \
+    rtl/preprocessing/fft_twiddle_rom.v \
+    rtl/preprocessing/mel_fb.v \
+    rtl/preprocessing/mel_rom.v \
+    rtl/preprocessing/log_q8.v \
+    rtl/preprocessing/log_lut.v \
+    rtl/preprocessing/dct40.v \
+    rtl/preprocessing/mfcc_roms.v \
+    rtl/preprocessing/mfcc_top.v \
 ]
 read_xdc constrs/pa_starlite.xdc
 

@@ -51,3 +51,33 @@ set_input_delay -clock clk48 2.000 [get_ports key]
 
 # ---- no use of the transceivers, keep the report clean ----------------------
 set_property SEVERITY {Info} [get_drc_checks NSTD-1]
+
+# =============================================================================
+# WM8960 audio codec (JM2 connector)
+# -----------------------------------------------------------------------------
+# Pin numbers come from the board vendor's connector spreadsheet
+# ("Puzhi PA-Starlite Connectors Pins Signal and Equal Length.xlsx", JM2 sheet),
+# matching the earlier Sonic-Speed-Parallelism project's constrs/audio.xdc.
+#
+# J20 / K18 are clock-capable pins (SRCC / MRCC), which is why BCLK and LRCLK sit
+# there: i2s_rx uses BCLK as a real clock, so it gets a create_clock below and the
+# 2-FF toggle synchroniser into the 48 MHz domain becomes a false path.
+# This project runs the codec at 16 kHz, so BCLK is 1.024 MHz (not 3.072 MHz).
+# =============================================================================
+set_property -dict {PACKAGE_PIN J20 IOSTANDARD LVCMOS33} [get_ports aud_bclk]
+set_property -dict {PACKAGE_PIN K18 IOSTANDARD LVCMOS33} [get_ports aud_lrclk]
+set_property -dict {PACKAGE_PIN H20 IOSTANDARD LVCMOS33} [get_ports aud_adcdat]
+set_property -dict {PACKAGE_PIN K21 IOSTANDARD LVCMOS33} [get_ports aud_scl]
+set_property -dict {PACKAGE_PIN K22 IOSTANDARD LVCMOS33} [get_ports aud_sda]
+
+# 16 kHz * 64 bit/slot = 1.024 MHz BCLK; LRCLK (16 kHz) is data as far as the
+# tools are concerned -- the BCLK-domain logic samples it as an ordinary signal.
+create_clock -name aud_bclk -period 976.562 -waveform {0.000 488.281} [get_ports aud_bclk]
+set_false_path -from [get_ports aud_lrclk] -to [get_clocks aud_bclk]
+
+# the only crossing is the single-bit "new sample" toggle through 2 FFs
+set_false_path -from [get_clocks aud_bclk] -to [get_clocks -of_objects [get_pins u_clk/u_bufg/O]]
+set_false_path -from [get_clocks -of_objects [get_pins u_clk/u_bufg/O]] -to [get_clocks aud_bclk]
+
+# open-drain I2C: the codec has its own pull-ups, no internal pull needed
+set_property SLEW SLOW [get_ports {aud_scl}]

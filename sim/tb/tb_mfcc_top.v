@@ -105,6 +105,10 @@ module tb_mfcc_top;
             $display("             first bad addr %0d (c%0d f%0d); frame0 bad %0d, frames1..100 bad %0d",
                      firstbad, (firstbad < 0) ? 0 : firstbad / NFRAME,
                      (firstbad < 0) ? 0 : firstbad % NFRAME, f0bad, fbad);
+            // counters are plain regs (safe to read hierarchically; only BRAM
+            // arrays return X under iverilog)
+            $display("             fft_drop=%0d bins=%0d frame=%0d",
+                     u_mfcc.fft_drop, u_mfcc.bins, u_mfcc.frame_o);
             if ($test$plusargs("dump") && vi == 0) begin
                 $write("    frame0 rtl:");
                 for (i = 0; i < 40; i = i + 1) $write(" %0d", got_mem[i*NFRAME]);
