@@ -161,7 +161,7 @@ module tb_board_top;
 
         // 2) key press starts the capture
         key = 1'b1;
-        repeat (20) @(negedge clk);
+        repeat (40000) @(negedge clk);     // > debounce (341 us = 16.4k clocks)
         key = 1'b0;
 
         // 3) play one second of audio (sped up: 100 MHz BCLK)

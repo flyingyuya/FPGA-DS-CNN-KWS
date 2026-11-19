@@ -63,13 +63,38 @@ module board_top #(
         .clk(clk), .rst_n(rst_n), .locked(locked)
     );
 
-    // ---- key: synchronise and detect a press --------------------------------
-    reg [2:0] ks;
-    always @(posedge clk or negedge rst_n)
-        if (!rst_n) ks <= 3'b000;
-        else        ks <= {ks[1:0], key};
+    // ---- key: synchronise, DEBOUNCE, then edge detect ----------------------
+    // The original version had no debounce, on the theory that a mechanical press
+    // lasts many milliseconds.  On the real board the key pin floats when it is
+    // not driven and picks up noise, which produced a stream of phantom presses
+    // and a continuous stream of UART reports.
+    reg [2:0]  ks;
+    reg        key_db;
+    reg [13:0] dbc;                            // 2^14 / 48 MHz = 341 us
+    reg        key_db_q;
 
-    wire key_press = (ks[2:1] == 2'b01);      // rising edge of the (active-high) key
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ks <= 3'b000; key_db <= 1'b0; dbc <= 14'd0; key_db_q <= 1'b0;
+        end else begin
+            ks <= {ks[1:0], key};
+            if (ks[2] != key_db) begin
+                if (dbc == 14'h3FFF) begin key_db <= ks[2]; dbc <= 14'd0; end
+                else                        dbc    <= dbc + 14'd1;
+            end else begin
+                dbc <= 14'd0;
+            end
+            key_db_q <= key_db;
+        end
+    end
+
+    wire key_edge = key_db & ~key_db_q;       // rising edge of the debounced key
+
+    // Cool-down: one run takes ~1.02 s (1 s of audio + 22 ms of compute), so a
+    // press that arrives sooner can only be noise.  2^26 / 48 MHz = 1.4 s.
+    reg [25:0] lock;
+    wire key_press = key_edge & (lock == 26'd0);
+
 
     // ---- WM8960 register init (I2C) + I2S receive --------------------------
     reg        wm_go;
@@ -113,6 +138,8 @@ module board_top #(
 
     reg [2:0]  seq;
     reg        wm_started;
+    reg        wm_ok;                 // codec acknowledged its I2C init
+    reg [23:0] wm_to;                 // init timeout (~350 ms), see S_INIT
     reg        acc_start;
     reg [11:0] sptr;
 
@@ -138,6 +165,14 @@ module board_top #(
         .logits_o(logits), .class_o(class_o), .max_o(max_o), .margin_o(margin_o),
         .result_valid(result_valid), .cycles_o(cycles_o), .layer_o(layer_o));
 
+    // ---- key cool-down (needs busy from the accelerator instance above) ------
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) lock <= 26'd0;
+        else if (key_press && seq == S_KEY && !mfcc_busy && !busy)
+            lock <= 26'h3FF_FFFF;
+        else if (lock != 26'd0)
+            lock <= lock - 26'd1;
+    end
     // =========================================================================
     // sequencer
     //   S_INIT   wait for the codec's I2C init
@@ -153,6 +188,8 @@ module board_top #(
             seq        <= S_INIT;
             wm_go      <= 1'b0;
             wm_started <= 1'b0;
+            wm_ok      <= 1'b0;
+            wm_to      <= 24'hFF_FFFF;
             acc_start <= 1'b0;
             sptr      <= 12'd0;
         end else begin
@@ -161,14 +198,22 @@ module board_top #(
             // WM8960_init treats Go as a LEVEL with priority over the table
             // counter (else if (Go) cnt <= 0), so holding it high freezes the
             // sequence at zero writes.  It has to be a one-cycle pulse.
-            S_INIT: if (wm_done) begin
-                seq   <= S_KEY;
-                wm_go <= 1'b0;
-            end else if (!wm_started) begin
-                wm_go      <= 1'b1;
-                wm_started <= 1'b1;
-            end else begin
-                wm_go <= 1'b0;
+            S_INIT: begin
+                if (wm_to != 24'd0) wm_to <= wm_to - 24'd1;
+                if (wm_done) begin
+                    seq   <= S_KEY;
+                    wm_go <= 1'b0;
+                    wm_ok <= 1'b1;
+                end else if (!wm_started) begin
+                    wm_go      <= 1'b1;
+                    wm_started <= 1'b1;
+                end else begin
+                    wm_go <= 1'b0;
+                    // Do not let a silent codec brick the demo: after ~350 ms
+                    // (the real init takes ~70 ms at 400 kHz SCL) keep going and
+                    // show the failure on led[1] instead of hanging forever.
+                    if (wm_to == 24'd0) seq <= S_KEY;
+                end
             end
             S_KEY: if (key_press && !mfcc_busy && !busy) seq <= S_MFCC;
             S_MFCC: if (mfcc_done) begin
@@ -234,6 +279,32 @@ module board_top #(
         .clk(clk), .rst_n(rst_n), .send(tx_send), .tx_data(tx_byte),
         .tx(uart_tx), .busy(tx_busy));
 
-    assign led = {new_result, busy};
+    // ---- bring-up indicators -----------------------------------------------
+    // led[0] is a free-running heartbeat: if it is not blinking, the clock or
+    // the reset never came up (bitstream not loaded, MMCM unlocked, wrong pins).
+    // led[1] tells you where the sequencer is:
+    //     fast blink : waiting for the codec's I2C init (or it timed out)
+    //     solid      : computing (MFCC or classification)
+    //     short flash: a new classification arrived
+    //     off        : ready, press the key
+    reg [24:0] hb;
+    reg [22:0] hold;                  // ~175 ms result flash at 48 MHz
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            hb   <= 25'd0;
+            hold <= 23'd0;
+        end else begin
+            hb <= hb + 25'd1;
+            if (result_valid)      hold <= 23'h7F_FFFF;
+            else if (hold != 23'd0) hold <= hold - 23'd1;
+        end
+    end
+
+    assign led[0] = hb[24];                                   // ~1.4 Hz
+    assign led[1] = !wm_ok            ? hb[21] :              // ~5.7 Hz: codec not configured
+                    (mfcc_busy | busy) ? 1'b1  :              // computing
+                    (hold != 23'd0)    ? 1'b1  :              // new result
+                                         1'b0;
 
 endmodule
