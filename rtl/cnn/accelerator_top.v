@@ -1,34 +1,39 @@
 // =============================================================================
-// accelerator_top.v -- the accelerator: layer FSM + one engine + one dual-bank memory.
+// accelerator_top.v -- layer FSM + one engine + one dual-bank memory.
 //
-//     MFCC stream --> FMEM(4 KB)                  weight ROM, const ROM
-//                        |                                 |
-//                        v                                 v
-//     +------------------+--------------------+   +--------+--------+
-//     |              bank memory              |   |  conv_engine    |
-//     | 2 x 1024 words x 256 bit, 2 ports     +-->+  (fetch FSM +   +--> argmax tree
-//     | bank bit = address MSB (no read mux!) |   |  address gen)   |        |
-//     +------------------+--------------------+   +--------+--------+        v
-//                                                          |            class/margin
+//     map write (MFCC) --> FMEM (4096 x 8)          weight ROM, const ROM
+//                              |                              |
+//                              v                              v
+//     +------------------------+------------------+   +--------+--------+
+//     |            bank memory                    |   |  conv_engine    |
+//     | 2 x KWS_BANK_WORDS words x 256 bit, 2 ports+-->+ (fetch FSM +    +--> argmax
+//     | bank bit = address MSB (no read mux!)     |   |  address gen)   |    tree
+//     +------------------------+------------------+   +--------+--------+      |
+//                                                          |          class/margin
 //                                                          v
-//                                                  pe_array(32 lines)
+//                                                  pe_array(32 lanes)
 //
 // Design notes
 // ------------
-// * ONE engine serves all 11 layers (see conv_engine.v).  The layer FSM below only
-//   broadcasts a configuration and waits for `done`; it has no inner-loop logic,
-//   which is the Layer FSM / Fetch FSM combination.
+// * ONE engine serves all 11 layers (see conv_engine.v).  The layer FSM here only
+//   broadcasts a configuration and waits; it has no inner-loop logic.
 //
-// * The two ping-pong activation banks live in ONE memory whose top address bit is
+// * Both ping-pong activation banks live in ONE memory whose top address bit is
 //   the bank.  Layer N reads {src_sel, addr} and writes {dst_sel, addr}, so the
-//   usual 256-bit read multiplexer between two banks disappears completely.  The
-//   reserved zero word used for padding is per bank for free, because
-//   {src_sel, all-ones} is the last word of the source bank.
+//   usual 256-bit read multiplexer between two banks disappears.  The reserved
+//   zero word for padding comes for free: {src_sel, all-ones} is the last word of
+//   the source bank.
 //
-// * Bank assignment follows the layer order: the stem writes bank 0, then the
-//   banks alternate, so a layer never reads what it is writing.
+// * Bank depth is KWS_BANK_WORDS = 2^ceil(log2(largest layer output)) -- 512 for
+//   the 20x101 model (stem out 10x51 = 510), 1024 for 40x101.  That single
+//   derived constant is what sets the activation BRAM count (8 here).
 //
-// * Result: 55,477 cycles per inference measured (1.156 ms at 48 MHz).
+// * Two ways in: the stream loader (in_valid/in_data/in_last, used by the
+//   accelerator testbench and by a host loading a vector) or map_we/map_addr/
+//   map_data straight into FMEM (the on-chip MFCC).  They share FMEM's single
+//   write port; `skip_load` says which path was used.
+//
+// * 27,035 cycles per inference (0.563 ms at 48 MHz) for the 20x101 model.
 // =============================================================================
 `timescale 1ns / 1ps
 `include "kws_params.vh"

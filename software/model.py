@@ -1,12 +1,12 @@
-"""DS-CNN for 40x101 MFCC keyword spotting, matching the accelerator layer table.
+"""DS-CNN for 20x101 MFCC keyword spotting, matching the accelerator layer table.
 
-    input  1 x 40 x 101 (UINT8 MFCC codes in hardware)
-    stem   3x3 conv, 32 ch, stride 2      -> 32 x 20 x 51
-    dw1    3x3 depthwise, stride 2        -> 32 x 10 x 26
-    pw1    1x1 conv, 32 ch                -> 32 x 10 x 26
-    dw2    3x3 depthwise, stride 2        -> 32 x  5 x 13
-    pw2    1x1 conv, 64 ch                -> 64 x  5 x 13
-    dw3/pw3, dw4/pw4  (stride 1, 64 ch)   -> 64 x  5 x 13
+    input  1 x 20 x 101 (UINT8 MFCC codes in hardware)
+    stem   3x3 conv, 32 ch, stride 2      -> 32 x 10 x 51
+    dw1    3x3 depthwise, stride 2        -> 32 x 5  x 26
+    pw1    1x1 conv, 32 ch                -> 32 x 5  x 26
+    dw2    3x3 depthwise, stride 2        -> 32 x 3  x 13
+    pw2    1x1 conv, 64 ch                -> 64 x 3  x 13
+    dw3/pw3, dw4/pw4  (stride 1, 64 ch)   -> 64 x 3  x 13
     gap    global average pool            -> 64
     fc     64 -> 12 logits
 

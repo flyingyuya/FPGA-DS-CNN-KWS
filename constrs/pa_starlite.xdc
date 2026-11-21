@@ -28,7 +28,9 @@ set_property BITSTREAM.CONFIG.SPI_FALL_EDGE     Yes  [current_design]
 set_property -dict {PACKAGE_PIN R4  IOSTANDARD DIFF_SSTL15} [get_ports sys_clk_p]
 set_property -dict {PACKAGE_PIN T4  IOSTANDARD DIFF_SSTL15} [get_ports sys_clk_n]
 set_property -dict {PACKAGE_PIN R14 IOSTANDARD LVCMOS33}    [get_ports sys_rstn]
-set_property -dict {PACKAGE_PIN W21 IOSTANDARD LVCMOS33}    [get_ports key]
+set_property -dict {PACKAGE_PIN W21 IOSTANDARD LVCMOS33}    [get_ports key1]
+# KEY2 (Y21) toggles single-shot <-> continuous recognition
+set_property -dict {PACKAGE_PIN Y21 IOSTANDARD LVCMOS33}    [get_ports key2]
 set_property -dict {PACKAGE_PIN P15 IOSTANDARD LVCMOS33}    [get_ports uart_tx]
 set_property -dict {PACKAGE_PIN W22 IOSTANDARD LVCMOS33}    [get_ports {led[0]}]
 set_property -dict {PACKAGE_PIN Y22 IOSTANDARD LVCMOS33}    [get_ports {led[1]}]
@@ -44,13 +46,15 @@ create_clock -name sys_clk -period 5.000 [get_ports sys_clk_p]
 
 # the reset key is asynchronous to everything
 set_false_path -from [get_ports sys_rstn]
-set_false_path -from [get_ports key]
+set_false_path -from [get_ports {key1 key2}]
 
-# inputs that are sampled by clk48 only
-set_input_delay -clock clk48 2.000 [get_ports key]
+# (there was a set_input_delay -clock clk48 here; no such clock exists -- the
+#  system clock is the MMCM output -- so it only produced a critical warning
+#  every run.  Both keys are already excluded from timing with set_false_path.)
 
 # ---- no use of the transceivers, keep the report clean ----------------------
-set_property SEVERITY {Info} [get_drc_checks NSTD-1]
+# (was: set_property SEVERITY {Info} [get_drc_checks NSTD-1] -- NSTD-1 no longer
+#  exists as a check, so it produced "Invalid severity Info" on every run)
 
 # =============================================================================
 # WM8960 audio codec (JM2 connector)

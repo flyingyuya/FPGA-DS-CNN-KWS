@@ -1,30 +1,38 @@
 // =============================================================================
 // board_top.v -- PA-StarLite board wrapper (xc7a100t-2fgg484).
 //
-// Scope: make the accelerator placeable and observable on the real board, using
-// the pin set published in the board's own example projects.  The MFCC frame is
-// baked into the FMEM block RAM at configuration time, so this build classifies
-// one fixed test vector per key press:
+// Signal path:
 //
-//     key (W21)  -> start          one inference, 55,522 cycles (1.16 ms)
-//     led[0]     -> busy           on while the accelerator runs
-//     led[1]     -> result         blinks when a new class has been latched
-//     uart_tx    -> 115200 8N1     sends 0xA5, class, margin in one burst
+//   WM8960 (I2S master, 16 kHz) --bclk/lrclk/adcdat--> i2s_rx (CDC)
+//        -> mfcc_top   : streaming front end, one window of history,
+//                        `KWS_H_IN x `KWS_W_IN codes per run (~16.3 ms)
+//        -> FMEM       : written directly through accelerator_top's map_we port
+//                        (no staging buffer -- the MFCC and the loader never
+//                        write at the same time, so they share the port)
+//        -> accelerator_top (skip_load=1): 27,035 cycles = 0.563 ms
+//        -> UART 115200 8N1: 0xA5, class, margin_hi, margin_lo, checksum
+//                            (checksum = XOR of the first four bytes)
 //
-// wired the real audio path:
+// Interaction
+// -----------
+//   KEY1 (W21) : port key1, one recognition per press -- press, then speak for ~1 s.
+//   KEY2 (Y21) : toggles single-shot <-> continuous.  In continuous mode the next
+//                window starts the instant the accelerator finishes, so the board
+//                recognises non-stop at ~1 Hz; the ~0.6 ms of audio lost during
+//                the accelerator run is 0.06% of a window and needs no memory.
+//   Both are debounced by key_debounce (20 ms, active-low).
 //
-//   WM8960 (I2S master, 16 kHz) --bclk/lrclk/adcdat--> i2s_rx
-//        -> mfcc_top (16000 samples in, 40x101 INT8 map out, ~21 ms)
-//        -> FMEM, written directly through accelerator_top's map_we port
-//        -> accelerator_top (skip_load=1)
-//        -> UART (0xA5, class, margin)
+// LEDs
+// ----
+//   led[0] : free-running heartbeat (~1.4 Hz).  Not blinking means the clock,
+//            the reset, or the bitstream is wrong -- nothing else.
+//   led[1] : ~5.7 Hz = codec I2C not configured (or it timed out at 350 ms)
+//            solid   = computing
+//            flash   = a new result arrived (175 ms)
+//            ~2.8 Hz = continuous mode, idle
+//            off     = single-shot, ready
 //
-// mfcc_top writes in frame-major order and the stream loader wants address
-// order, but the two writers never overlap, so they share FMEM's write port
-// behind a mux instead of going through a 4 KiB staging buffer.
-//
-// Flow: power-up runs the I2C init; then each key press records one second of
-// audio and classifies it.
+// UART frame: 0xA5 is a sync byte, see the result-reporting block below.
 // =============================================================================
 `timescale 1ns / 1ps
 `include "kws_params.vh"
@@ -32,12 +40,15 @@
 module board_top #(
     parameter integer NUM_CLASSES = `KWS_NUM_CLASSES,
     parameter         MEM_DIR     = "mem",
-    parameter integer WM_DLY_MS   = 1        // gap between I2C register writes
+    parameter integer WM_DLY_MS   = 1,       // gap between I2C register writes
+    // power-up mode is single-shot; KEY2 (Y21) toggles continuous recognition
+    parameter integer FREE_RUN_DEFAULT = 0
 ) (
     input  wire sys_clk_p,
     input  wire sys_clk_n,
     input  wire sys_rstn,
-    input  wire key,             // W21
+    input  wire key1,             // W21: one recognition per press (single-shot mode)
+    input  wire key2,            // Y21: toggles single-shot <-> continuous
     output wire uart_tx,         // P15
     output wire [1:0] led,       // W22 / Y22
 
@@ -58,11 +69,28 @@ module board_top #(
     );
 
     // ---- key: debounce (20 ms) + single-shot pulse -------------------------
-    wire key_press;
+    wire key1_press;      // one-cycle pulse: KEY1 pressed
+    wire key2_press;     // one-cycle pulse: KEY2 pressed (mode toggle)
 
     key_debounce #(.CLK_HZ(48_000_000), .MS(20)) u_key (
         .clk(clk), .rst_n(rst_n),
-        .key_n(key), .key_pressed(), .press(key_press));
+        .key_n(key1), .key_pressed(), .press(key1_press));
+
+    key_debounce #(.CLK_HZ(48_000_000), .MS(20)) u_key2 (
+        .clk(clk), .rst_n(rst_n),
+        .key_n(key2), .key_pressed(), .press(key2_press));
+
+    // ---- recognition mode ---------------------------------------------------
+    // Single-shot (default) or continuous, toggled by KEY2.  In continuous mode
+    // the next 1 s window starts the moment the accelerator finishes, so the
+    // board recognises non-stop at ~1 Hz: the 0.56 ms of audio lost during the
+    // accelerator run is 0.06% of a window, inaudible, and it needs no extra
+    // memory because the front end only ever keeps one window of history.
+    reg free_run;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)              free_run <= (FREE_RUN_DEFAULT != 0);
+        else if (key2_press)     free_run <= ~free_run;
+    end
 
     // ---- WM8960 register init (I2C) + I2S receive --------------------------
     reg wm_go;
@@ -90,7 +118,6 @@ module board_top #(
                .NFRAME(`KWS_W_IN), .NNORM(`KWS_H_IN)) u_mfcc (
         .clk(clk), .rst_n(rst_n),
         .s_valid(aud_valid), .s_data(aud_data),
-        .freeze(mfcc_busy),             // freeze the ring only while the MFCC runs
         .s_ready(),
         .start(mfcc_start), .busy(mfcc_busy), .done(mfcc_done),
         .mfcc_we(mfcc_we), .mfcc_addr(mfcc_addr), .mfcc_data(mfcc_data),
@@ -125,7 +152,8 @@ module board_top #(
         .result_valid(), .cycles_o(cycles_o), .layer_o(layer_o));
 
     // ---- the one request that starts a run ---------------------------------
-    wire run_req = key_press & (seq == S_KEY) & ~mfcc_busy & ~act_busy;
+    wire auto_req = free_run & ~mfcc_busy & ~act_busy;
+    wire run_req  = (key1_press | auto_req) & (seq == S_KEY) & ~mfcc_busy & ~act_busy;
 
     // =========================================================================
     // sequencer
@@ -183,14 +211,44 @@ module board_top #(
     end
 
     // ---- UART_TX FSM -------------------------------------------------------
+    // Report = 5 bytes: 0xA5, class, margin_hi, margin_lo, checksum.
+    // The margin is a signed INT16 logit difference; sending only its low byte
+    // (as the first draft did) wrapped at 255 and turned negatives into large
+    // positives.  The checksum lets the host drop mis-framed reports.
     reg  [3:0]  class_q;
+    reg  [15:0] margin_q;
+    reg  [7:0]  csum_q;
+    wire [7:0]  cls_b = {4'h0, class_q};
+    wire [7:0]  m_hi  = margin_q[15:8];
+    wire [7:0]  m_lo  = margin_q[7:0];
     reg         new_result;
-    reg  [1:0]  tx_state;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            class_q    <= 4'd0;
+            new_result <= 1'b0;
+        end else if (act_done) begin
+            class_q    <= class_o;
+            new_result <= ~new_result;      // toggles per classification
+        end
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            margin_q <= 16'd0;
+            csum_q   <= 8'd0;
+        end else if (act_done) begin
+            margin_q <= margin_o;
+            csum_q   <= 8'hA5 ^ {4'h0, class_o} ^ margin_o[15:8] ^ margin_o[7:0];
+        end
+    end
+    reg  [2:0]  tx_state;
     reg  [7:0]  tx_byte;
     reg         tx_send;
     wire        tx_busy;
 
-    localparam [1:0] T_IDLE = 2'd0, T_CLASS = 2'd1, T_MARGIN = 2'd2, T_WAIT = 2'd3;
+    localparam [2:0] T_IDLE = 3'd0, T_CLASS = 3'd1, T_MHI = 3'd2, T_MLO = 3'd3,
+                     T_CSUM = 3'd4, T_WAIT = 3'd5;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -206,12 +264,22 @@ module board_top #(
                 tx_state <= T_CLASS;
             end
             T_CLASS: if (!tx_busy && !tx_send) begin
-                tx_byte  <= {4'h0, class_o};
+                tx_byte  <= cls_b;
                 tx_send  <= 1'b1;
-                tx_state <= T_MARGIN;
+                tx_state <= T_MHI;
             end
-            T_MARGIN: if (!tx_busy && !tx_send) begin
-                tx_byte  <= margin_o[7:0];
+            T_MHI: if (!tx_busy && !tx_send) begin
+                tx_byte  <= m_hi;
+                tx_send  <= 1'b1;
+                tx_state <= T_MLO;
+            end
+            T_MLO: if (!tx_busy && !tx_send) begin
+                tx_byte  <= m_lo;
+                tx_send  <= 1'b1;
+                tx_state <= T_CSUM;
+            end
+            T_CSUM: if (!tx_busy && !tx_send) begin
+                tx_byte  <= csum_q;
                 tx_send  <= 1'b1;
                 tx_state <= T_WAIT;
             end

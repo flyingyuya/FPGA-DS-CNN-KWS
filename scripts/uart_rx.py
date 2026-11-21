@@ -4,12 +4,14 @@
 uart_rx.py -- 读板子发回来的分类结果（115200 8N1）。
 
 协议（见 rtl/board_top.v 的 result reporting）：
-    每次分类完成，板子连发 3 个字节：
-        0xA5   <class>   <margin>
+    每次分类完成，板子连发 5 个字节：
+        0xA5   <class>   <margin_hi>   <margin_lo>   <checksum>
+        checksum = 前四个字节的异或
     class  : 0=silence 1=unknown 2=yes 3=no 4=up 5=down 6=left 7=right
              8=on 9=off 10=stop 11=go
-    margin : 第一名与第二名的 logit 差，取低 8 位（RTL 里是 margin_o[7:0]，
-             所以 >255 会回绕——只当"把握大不大"看，不要当精确值用）
+    margin : 第一名与第二名的 logit 差，**有符号 16 位**（越大越确信）
+    checksum 不对的帧直接丢弃并计数——3 字节无校验时，margin 恰好等于 0xA5
+    会被误当成帧头，现在不会了
 
 用法：
     ./scripts/uart_rx.py                  # 自动找板子的串口，一直打印
@@ -25,15 +27,25 @@ LABELS = ["silence", "unknown", "yes", "no", "up", "down",
           "left", "right", "on", "off", "stop", "go"]
 
 SYNC = 0xA5
+FRAME = 5
 
 
 def decode(stream):
-    """把字节流解成 (class, margin) 列表；能容忍插入的杂字节。"""
+    """把字节流解成 (class, margin, ok) 列表；能容忍杂字节和坏帧。
+
+    返回的第三项是校验结果：False 表示这一帧的 checksum 不对（被丢弃前先报出来，
+    便于发现链路问题）。调用方负责把 False 的帧计入 dropped。
+    """
     out, i = [], 0
-    while i < len(stream):
-        if stream[i] == SYNC and i + 2 < len(stream):
-            out.append((stream[i + 1], stream[i + 2]))
-            i += 3
+    while i + FRAME <= len(stream):
+        if stream[i] == SYNC:
+            b = stream[i:i + FRAME]
+            ok = (b[0] ^ b[1] ^ b[2] ^ b[3]) == b[4]
+            margin = ((b[2] << 8) | b[3]) & 0xFFFF
+            if margin & 0x8000:
+                margin -= 0x10000          # signed INT16
+            out.append((b[1], margin, ok))
+            i += FRAME
         else:
             i += 1
     return out
@@ -59,8 +71,14 @@ def selftest():
     # a clean frame, a frame preceded by noise, and a truncated tail
     stream = [0x00, 0xFF, SYNC, 2, 82, SYNC, 10, 7, 0x13, SYNC, 5]
     got = decode(stream)
-    want = [(2, 82), (10, 7)]
-    ok = got == want
+    def mk(cls, m):
+        hi, lo = (m >> 8) & 0xFF, m & 0xFF
+        return [SYNC, cls, hi, lo, SYNC ^ cls ^ hi ^ lo]
+
+    stream = [0x00, 0xFF] + mk(2, 85) + mk(10, -7) + [SYNC, 5, 0, 0, 0x00]
+    got = decode(stream)
+    want = [(2, 85, True), (10, -7, True)]
+    ok = got[:2] == want and got[2][2] is False
     print(f"  selftest: decoded {got} (expected {want}) -> {'OK' if ok else 'FAIL'}")
     return 0 if ok else 1
 
@@ -91,6 +109,7 @@ def main():
     print(f"  打开 {port} @ {args.baud} 8N1，等分类结果（Ctrl-C 退出）…")
     buf = bytearray()
     n = 0
+    dropped = 0
     t0 = None
     try:
         ser = serial.Serial(port, args.baud, timeout=0.2)
@@ -114,7 +133,10 @@ def main():
                 if args.raw:
                     print("  raw:", " ".join(f"{b:02x}" for b in chunk))
                 buf += chunk
-                for cls, margin in decode(buf):
+                for cls, margin, ok in decode(buf):
+                    if not ok:
+                        dropped += 1
+                        continue
                     n += 1
                     now = time.time()
                     dt = "" if t0 is None else f"  (+{now - t0:6.2f}s)"
@@ -122,10 +144,10 @@ def main():
                     name = LABELS[cls] if cls < len(LABELS) else f"?{cls}"
                     print(f"  [{n:3d}] class {cls:2d} = {name:<8s} margin {margin:3d}{dt}")
                 # drop whole bytes we have already consumed, keep a partial tail
-                if len(buf) > 2:
-                    del buf[:len(buf) - (len(buf) % 3)]
+                if len(buf) >= FRAME:
+                    del buf[:len(buf) - (len(buf) % FRAME)]
         except KeyboardInterrupt:
-            print(f"\n  收到 {n} 个结果，退出。")
+            print(f"\n  收到 {n} 个结果，丢弃 {dropped} 个坏帧，退出。")
     return 0
 
 
