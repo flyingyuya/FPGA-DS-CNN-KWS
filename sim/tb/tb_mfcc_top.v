@@ -35,6 +35,8 @@ module tb_mfcc_top;
     wire [11:0] mfcc_addr;
     wire [7:0]  mfcc_data;
     wire [31:0] cycles_o;
+    reg signed [15:0] stim [0:NSAMP-1];
+    wire        s_ready;
     reg         st_valid = 1'b0;
     reg  signed [15:0] st_data = 16'sd0;
     integer     fin;
@@ -43,7 +45,7 @@ module tb_mfcc_top;
 
     mfcc_top #(.NSAMP(NSAMP), .NFRAME(NFRAME), .SKIP_LOAD(STREAM_MODE)) u_mfcc (
         .clk(clk), .rst_n(rst_n),
-        .s_valid(st_valid), .s_data(st_data), .s_ready(),
+        .s_valid(st_valid), .s_data(st_data), .s_ready(s_ready),
         .start(start), .busy(busy), .done(done),
         .mfcc_we(mfcc_we), .mfcc_addr(mfcc_addr), .mfcc_data(mfcc_data),
         .cycles_o(cycles_o), .frame_o(frame_o));
@@ -92,25 +94,30 @@ module tb_mfcc_top;
         input integer vi;
         begin
             $sformat(path, "golden/mfcc/in_%0s.mem", names[vi]);
-            $readmemh(path, u_mfcc.samp);
+            $readmemh(path, stim);
             $sformat(path, "golden/mfcc/exp_%0s.mem", names[vi]);
             $readmemh(path, exp_mem);
             for (i = 0; i < NCODE; i = i + 1) got_mem[i] = 8'hxx;
             nwrite = 0;
 
-            if (STREAM_MODE != 0) begin
-                for (i = 0; i < NSAMP; i = i + 1) begin
-                    @(negedge clk);
-                    st_valid = 1'b1;
-                    st_data  = $signed(u_mfcc.samp[i]);
-                end
-                @(negedge clk);
-                st_valid = 1'b0;
-            end
             @(negedge clk);
             start = 1'b1;
             @(negedge clk);
             start = 1'b0;
+            // Honour s_ready per sample, but only STALL when it is actually low.
+            // Waiting once per fixed burst was 5x slower, because the 32-sample
+            // ring slack is smaller than the 160 samples released per frame, so
+            // every burst ended up waiting a whole frame's compute.
+            for (i = 0; i < NSAMP; i = i + 1) begin
+                if (!s_ready) begin
+                    st_valid = 1'b0;
+                    while (!s_ready) @(negedge clk);
+                end
+                st_valid = 1'b1;
+                st_data  = stim[i];
+                @(negedge clk);
+            end
+            st_valid = 1'b0;
             while (!done) @(negedge clk);
             @(negedge clk);
 

@@ -1,28 +1,49 @@
 // =============================================================================
-// mfcc_top.v -- the whole on-chip MFCC front end: 1 s of 16 kHz PCM in,
-//               KWS_H_IN x KWS_W_IN UINT8 codes out (FMEM write port).
+// mfcc_top.v -- on-chip MFCC front end, streaming.  1 s of 16 kHz PCM in,
+//               `KWS_H_IN x `KWS_W_IN UINT8 codes out (FMEM write port).
 //
-//   sample buffer (16000 x 16)
-//     -> per frame f (0..100): 512-point windowed frame in Q1.23
-//          tap t < 480 : x = (samp[reflect(f*160 + t - 256)] * hann[t] + 64) >>> 7
-//          tap t >= 480: x = 0
-//     -> fft_core (N=512) -> 256 power bins (Q2.46)
-//     -> mel_fb           -> NNORM mel energies
-//     -> log_q8           -> NNORM logs (Q8.8)
-//     -> dct40            -> NNORM DCT coefficients (Q9.8)
-//     -> code = clamp((A[c]*dct + B[c] + 2^19) >> 20, 0, 255) -> FMEM[c*101 + f]
+// Per frame f = 0..NFRAME-1:
+//
+//   win_hist[reflect(f*HOP + t - NFFT/2)] * hann[t]        (t < WIN, else 0)
+//     -> fft_core (512 points)  -> 256 power bins, Q2.46
+//     -> mel_fb                 -> NNORM mel energies
+//     -> log_q8                 -> NNORM logs, Q8.8
+//     -> dct40                  -> NNORM DCT coefficients, Q9.8
+//     -> code = clamp((A[c]*dct + B[c] + 2^19) >> 20, 0, 255)
+//     -> FMEM[c*NFRAME + f]
+//
+// Streaming, not batch:
+//   * `win_hist` is only RING = 512 samples -- one window of history, which is
+//     what consecutive (480-sample overlapping) frames need.  It is NOT a 1 s
+//     buffer and costs no BRAM (about 44 LUTRAM).
+//   * `wcnt` counts the samples of this capture; frame f starts as soon as its
+//     window exists, so the source may be much slower than the compute --
+//     one frame is ~7.6k cycles = 158 us = 2.5 samples of 16 kHz audio, i.e. the
+//     audio is the slow side and no FIFO is needed.
+//   * `s_ready` throttles a fast source to RING-WIN (32) samples ahead of the
+//     frame being computed, which is what protects the window from being
+//     overwritten.  At 16 kHz it never binds.
+//   * `start` resets `wcnt`, so each run captures NFRAME seconds from that
+//     moment: KEY1 gives one-shot recognition, KEY2 gives continuous (~1 Hz).
 //
 // Reflect padding matches torch.stft(center=True, pad_mode="reflect"), so the map
-// is what the model was trained on.
+// is what the model was trained on; frame 0 reflects backwards (hence it needs
+// NFFT/2+1 samples, not just up to its window end) and the tail frames reflect
+// past the end of the capture.
 //
-// Cost scales with NNORM: at NNORM=20 a frame is ~7.6k cycles, so the whole
-// map (NFRAME=101) takes 768,913 cycles = 16.0 ms at 48 MHz.  Sustained real-time only needs one frame per 10 ms hop.
+// Cost: 781,745 cycles for the whole map (NFRAME=101, NNORM=20) = 16.3 ms at
+// 48 MHz.  Bit-exact against the integer reference: 3 clips x 2020 codes.
 // =============================================================================
 `timescale 1ns / 1ps
 `include "kws_params.vh"
 
 module mfcc_top #(
-    parameter integer NSAMP     = 16000,          // 1 s at 16 kHz (model input spec)
+    parameter integer NSAMP     = 16000,          // capture length: 1 s at 16 kHz
+                                                  // (the RING below is the storage)
+    // Only a WINDOW of history is needed, not the whole capture: the FSM starts
+    // frame f as soon as its 480 samples exist, so a RING-deep circular buffer
+    // (power of two -> the read index is a slice) is enough.  8 BRAM -> 0.25.
+    parameter integer RING      = 512,
     parameter integer NFRAME    = `KWS_W_IN,
     parameter integer NFFT      = 512,
     parameter integer WIN       = 480,
@@ -39,7 +60,6 @@ module mfcc_top #(
     // ---- sample stream (16-bit PCM, 16 kHz) --------------------------------
     input  wire                s_valid,
     input  wire signed [15:0]  s_data,
-    input  wire                freeze,  // 1 = stop capturing (a run is in progress)
     output wire                s_ready,
 
     // ---- control -----------------------------------------------------------
@@ -57,7 +77,7 @@ module mfcc_top #(
     output reg  [7:0]          frame_o
 );
 
-    localparam [3:0] S_IDLE = 4'd0, S_LOAD = 4'd1, S_WA = 4'd2,  S_WB   = 4'd3,
+    localparam [3:0] S_IDLE = 4'd0, S_WA = 4'd2,  S_WB   = 4'd3,
                      S_FFT  = 4'd4, S_MEL  = 4'd5, S_LOG  = 4'd6,  S_DCT  = 4'd7,
                      S_NORM = 4'd8, S_NDONE= 4'd9, S_DONE = 4'd10,
                      S_MEL2 = 4'd11;
@@ -80,32 +100,43 @@ module mfcc_top #(
     wire [13:0]        ridx = widx_ref[13:0];
 
     // =========================================================================
-    // sample buffer
+    // window history
     // =========================================================================
-    // The sample buffer is a 16000-entry RING, written continuously and frozen
-    // while a run is in progress.  Freezing costs the ~21 ms of audio thatarrives 
-    // during the MFCC run, shrinks as the MFCC latency is reduced.
+    // NOT a 1 s buffer: only RING=512 samples of history are kept, because consecutive
+    // frames overlap by 480 samples (frame f covers [f*160-256, f*160+224)).
     //
-    // `base` is the write pointer latched at `start`, i.e. the oldest sample;
-    // reads are offset by it and wrap modulo NSAMP.
-    (* ram_style = "block" *) reg signed [15:0] samp [0:NSAMP-1];
-    reg [13:0]        wr_ptr;
-    reg [13:0]        base;
-    // samp_re MUST be combinational: as a register it is high during S_WB, by
-    // which time t_idx has already advanced, so samp_q ended up holding samp[ridx(t+1)].
+    // `wcnt` counts the samples of this capture and tells the FSM when frame f's
+    // window exists, so no FIFO is needed against the 16 kHz source.
+    (* ram_style = "block" *) reg signed [15:0] win_hist [0:RING-1];
+    reg  [$clog2(RING)-1:0] wr_ptr;   // free running: value == absolute index
+    reg  [31:0]       wcnt;           // samples captured, saturates at NSAMP
+    // samp_re MUST be combinational: as a register it is high during S_WB, by which
+    // time t_idx has already advanced, so samp_q ended up holding win_hist[ridx(t+1)].
     wire              samp_re = (state == S_WA);
     reg signed [15:0] samp_q;
 
-    // ring offset: (base + reflected index) modulo NSAMP
-    wire [14:0] ridx_sum  = {1'b0, base} + {1'b0, ridx};
-    wire [13:0] ridx_ring = (ridx_sum >= NSAMP) ? (ridx_sum - NSAMP) : ridx_sum[13:0];
+    // the reflected absolute index maps straight onto the ring
+    wire [$clog2(RING)-1:0] ridx_ring = ridx[$clog2(RING)-1:0];
+
+    // ---- back-pressure ------------------------------------------------------
+    // The ring has only `RING - WIN` samples of slack, so the source must not run
+    // further ahead than that of the frame being computed.  At 16 kHz this never
+    // binds, but a fast source would otherwise overwrite the window being read.
+    localparam integer SLACK = RING - WIN;
+    // frame*HOP as shifts: HOP is 160 = 128+32.s
+    wire [31:0] need_raw = {frame, 7'b0} + {frame, 5'b0} + (WIN - NFFT/2);
+    // Frame 0's window reaches BACKWARDS: those taps are reflected onto samples 1..NFFT/2,
+    // so it needs NFFT/2+1 samples captured, not just up to the window's end.
+    wire [31:0] need_min = NFFT/2 + 1;
+    wire [31:0] need     = (need_raw < need_min) ? need_min :
+                           (need_raw < NSAMP)   ? need_raw : NSAMP;
 
     // memory write stays out of the reset branch so Vivado can infer BRAM
     always @(posedge clk) begin
-        if (s_valid && !freeze) samp[wr_ptr] <= s_data;
-        if (samp_re)            samp_q <= samp[ridx_ring];
+        if (s_valid && (wcnt < NSAMP)) win_hist[wr_ptr] <= s_data;
+        if (samp_re)                   samp_q <= win_hist[ridx_ring];
     end
-    assign s_ready = ~freeze;
+    assign s_ready = (wcnt < NSAMP) && (wcnt < need + SLACK);
 
     // =========================================================================
     // window ROM and the normalisation ROM (combinational reads)
@@ -149,7 +180,7 @@ module mfcc_top #(
     mel_fb u_mel (
         .clk(clk), .rst_n(rst_n),
         // ungated: the mel engine only reads this buffer in S_MEL/S_LOG, so
-        // writing it whenever the FFT produces a bin is safe -- and gating on
+        // writing it whenever the FFT produces a bin is safe and gating on
         // state == S_FFT silently drops any bin that arrives on the transition
         .pw_we(fft_valid), .pw_addr(fft_idx), .pw_data(fft_pow),
         .start(mel_start), .busy(mel_busy), .done(mel_done),
@@ -197,7 +228,7 @@ module mfcc_top #(
         if (!rst_n) begin
             state <= S_IDLE; busy <= 1'b0; done <= 1'b0; buf_ready <= 1'b0;
             frame <= 8'd0; t_idx <= 10'd0; n_idx <= 6'd0; bins <= 9'd0;
-            wr_ptr <= 14'd0; base <= 14'd0; cyc <= 32'd0;
+            wr_ptr <= {$clog2(RING){1'b0}}; wcnt <= 32'd0; cyc <= 32'd0;
             fft_we <= 1'b0; fft_in <= 24'sd0;
             mel_start <= 1'b0;
             log_we <= 1'b0; log_mel <= 54'd0;
@@ -214,8 +245,10 @@ module mfcc_top #(
             dct_start <= 1'b0;
             mfcc_we   <= 1'b0;
             if (busy) cyc <= cyc + 1'b1;
-            if (s_valid && !freeze)
-                wr_ptr <= (wr_ptr == NSAMP - 1) ? 14'd0 : wr_ptr + 14'd1;
+            if (s_valid && (wcnt < NSAMP)) begin
+                wr_ptr <= wr_ptr + 1'b1;
+                wcnt   <= wcnt + 32'd1;
+            end
 
             case (state)
             S_IDLE: begin
@@ -224,19 +257,17 @@ module mfcc_top #(
                     busy  <= 1'b1;
                     frame <= 8'd0;
                     cyc   <= 32'd0;
-                    base  <= wr_ptr;          // oldest sample = where the next
-                                              // write would have gone
-                    state <= (SKIP_LOAD != 0) ? S_WA : S_LOAD;
+                    wr_ptr <= {$clog2(RING){1'b0}};   // capture starts at the press
+                    wcnt   <= 32'd0;
+                    state  <= S_WA;
                 end
             end
 
-            // with a ring there is nothing to load: the buffer is already full
-            S_LOAD: state <= S_WA;
-
             // issue the sample read and the window address for tap t_idx
             S_WA: begin
-                frame_o  <= frame;
-                state    <= S_WB;
+                frame_o <= frame;
+                // need clamps to NSAMP, otherwise those frames wait forever
+                if (wcnt >= need) state <= S_WB;
             end
 
             // multiply, push to the FFT

@@ -73,20 +73,11 @@ CLIP_SAMPLES = 16000
 N_FFT = 512
 WIN_LENGTH = 480
 HOP_LENGTH = 160
-N_MELS = 20  # chosen by the feature-dimension ablation (docs §44):
-             # 20 bands cost 0.03 val points vs 40, but halve the input
-             # (4040->2020), the activation buffer (1020->510 <512) and the latency
+N_MELS = 20  # chosen by the feature-dimension ablation (docs §44)
 N_MFCC = 20  # = N_MELS: keep every mel band as a cepstral coefficient
 F_MIN, F_MAX = 20.0, 7600.0
-# Context actually fed to the network, in MFCC frames.  The map is computed over
-# the whole 1 s clip and then cropped to the centred N_FRAMES_USED frames, so this
-# is the one knob that changes the accelerator's input width (and therefore the
-# activation-bank size).
-#
-# MEASURED, do not lower it casually: 50 frames (490 ms) costs 9 points of FP32
-# accuracy (94.31% -> 85.33%).  The bank would drop from 16 to 8 BRAM36 because
-# the stem output of a 40x50 input is 20x25 = 500 words <= 512, but that saving is
-# nowhere near worth the accuracy.
+# Context actually fed to the network, in MFCC frames, so this is the one knob
+# that changes the accelerator's input width (and therefore the activation-bank size).
 N_FRAMES_USED = CLIP_SAMPLES // HOP_LENGTH + 1         # 101 = full 1 s
 H_IN, W_IN = N_MFCC, N_FRAMES_USED                     # 40, 101
 
