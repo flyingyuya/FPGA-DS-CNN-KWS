@@ -17,15 +17,15 @@
 `define KWS_NUM_LAYERS   11
 
 // ---- input tensor (MFCC) ----
-`define KWS_H_IN         40
+`define KWS_H_IN         20
 `define KWS_W_IN         101
-`define KWS_IN_PIXELS    4040
-`define KWS_IN_ADDR_W    13
+`define KWS_IN_PIXELS    2020
+`define KWS_IN_ADDR_W    11
 `define KWS_ZP_IN        96
 
 // ---- memories ----
-`define KWS_BANK_WORDS   1024
-`define KWS_BANK_ADDR_W  10
+`define KWS_BANK_WORDS   512
+`define KWS_BANK_ADDR_W  9
 `define KWS_WROM_WORDS   512
 `define KWS_WROM_ADDR_W  9
 `define KWS_CH_TOTAL     524
@@ -45,158 +45,158 @@
 `define KWS_L_FC     10
 
 // ---- global average pool ----
-`define KWS_GAP_N        65
+`define KWS_GAP_N        39
 `define KWS_GAP_SHIFT    6
 
 // ---- stem (std) ----
 `define KWS_STEM_KIND_STD  1
 `define KWS_STEM_CIN      1
 `define KWS_STEM_COUT     32
-`define KWS_STEM_HI       40
+`define KWS_STEM_HI       20
 `define KWS_STEM_WI       101
-`define KWS_STEM_HO       20
+`define KWS_STEM_HO       10
 `define KWS_STEM_WO       51
 `define KWS_STEM_STRIDE   2
 `define KWS_STEM_PAD      1
 `define KWS_STEM_NG       1
-`define KWS_STEM_PIXELS   1020
+`define KWS_STEM_PIXELS   510
 `define KWS_STEM_WROM_BASE 0
 `define KWS_STEM_CH_BASE  0
-`define KWS_STEM_OUT_WORDS 1020
+`define KWS_STEM_OUT_WORDS 510
 
 // ---- dw1 (dw) ----
 `define KWS_DW1_KIND_DW   1
 `define KWS_DW1_CIN      32
 `define KWS_DW1_COUT     32
-`define KWS_DW1_HI       20
+`define KWS_DW1_HI       10
 `define KWS_DW1_WI       51
-`define KWS_DW1_HO       10
+`define KWS_DW1_HO       5
 `define KWS_DW1_WO       26
 `define KWS_DW1_STRIDE   2
 `define KWS_DW1_PAD      1
 `define KWS_DW1_NG       1
-`define KWS_DW1_PIXELS   260
+`define KWS_DW1_PIXELS   130
 `define KWS_DW1_WROM_BASE 9
 `define KWS_DW1_CH_BASE  32
-`define KWS_DW1_OUT_WORDS 260
+`define KWS_DW1_OUT_WORDS 130
 
 // ---- pw1 (pw) ----
 `define KWS_PW1_KIND_PW   1
 `define KWS_PW1_CIN      32
 `define KWS_PW1_COUT     32
-`define KWS_PW1_HI       10
+`define KWS_PW1_HI       5
 `define KWS_PW1_WI       26
-`define KWS_PW1_HO       10
+`define KWS_PW1_HO       5
 `define KWS_PW1_WO       26
 `define KWS_PW1_STRIDE   1
 `define KWS_PW1_PAD      0
 `define KWS_PW1_NG       1
-`define KWS_PW1_PIXELS   260
+`define KWS_PW1_PIXELS   130
 `define KWS_PW1_WROM_BASE 18
 `define KWS_PW1_CH_BASE  64
-`define KWS_PW1_OUT_WORDS 260
+`define KWS_PW1_OUT_WORDS 130
 
 // ---- dw2 (dw) ----
 `define KWS_DW2_KIND_DW   1
 `define KWS_DW2_CIN      32
 `define KWS_DW2_COUT     32
-`define KWS_DW2_HI       10
+`define KWS_DW2_HI       5
 `define KWS_DW2_WI       26
-`define KWS_DW2_HO       5
+`define KWS_DW2_HO       3
 `define KWS_DW2_WO       13
 `define KWS_DW2_STRIDE   2
 `define KWS_DW2_PAD      1
 `define KWS_DW2_NG       1
-`define KWS_DW2_PIXELS   65
+`define KWS_DW2_PIXELS   39
 `define KWS_DW2_WROM_BASE 50
 `define KWS_DW2_CH_BASE  96
-`define KWS_DW2_OUT_WORDS 65
+`define KWS_DW2_OUT_WORDS 39
 
 // ---- pw2 (pw) ----
 `define KWS_PW2_KIND_PW   1
 `define KWS_PW2_CIN      32
 `define KWS_PW2_COUT     64
-`define KWS_PW2_HI       5
+`define KWS_PW2_HI       3
 `define KWS_PW2_WI       13
-`define KWS_PW2_HO       5
+`define KWS_PW2_HO       3
 `define KWS_PW2_WO       13
 `define KWS_PW2_STRIDE   1
 `define KWS_PW2_PAD      0
 `define KWS_PW2_NG       2
-`define KWS_PW2_PIXELS   65
+`define KWS_PW2_PIXELS   39
 `define KWS_PW2_WROM_BASE 59
 `define KWS_PW2_CH_BASE  128
-`define KWS_PW2_OUT_WORDS 130
+`define KWS_PW2_OUT_WORDS 78
 
 // ---- dw3 (dw) ----
 `define KWS_DW3_KIND_DW   1
 `define KWS_DW3_CIN      64
 `define KWS_DW3_COUT     64
-`define KWS_DW3_HI       5
+`define KWS_DW3_HI       3
 `define KWS_DW3_WI       13
-`define KWS_DW3_HO       5
+`define KWS_DW3_HO       3
 `define KWS_DW3_WO       13
 `define KWS_DW3_STRIDE   1
 `define KWS_DW3_PAD      1
 `define KWS_DW3_NG       2
-`define KWS_DW3_PIXELS   65
+`define KWS_DW3_PIXELS   39
 `define KWS_DW3_WROM_BASE 123
 `define KWS_DW3_CH_BASE  192
-`define KWS_DW3_OUT_WORDS 130
+`define KWS_DW3_OUT_WORDS 78
 
 // ---- pw3 (pw) ----
 `define KWS_PW3_KIND_PW   1
 `define KWS_PW3_CIN      64
 `define KWS_PW3_COUT     64
-`define KWS_PW3_HI       5
+`define KWS_PW3_HI       3
 `define KWS_PW3_WI       13
-`define KWS_PW3_HO       5
+`define KWS_PW3_HO       3
 `define KWS_PW3_WO       13
 `define KWS_PW3_STRIDE   1
 `define KWS_PW3_PAD      0
 `define KWS_PW3_NG       2
-`define KWS_PW3_PIXELS   65
+`define KWS_PW3_PIXELS   39
 `define KWS_PW3_WROM_BASE 141
 `define KWS_PW3_CH_BASE  256
-`define KWS_PW3_OUT_WORDS 130
+`define KWS_PW3_OUT_WORDS 78
 
 // ---- dw4 (dw) ----
 `define KWS_DW4_KIND_DW   1
 `define KWS_DW4_CIN      64
 `define KWS_DW4_COUT     64
-`define KWS_DW4_HI       5
+`define KWS_DW4_HI       3
 `define KWS_DW4_WI       13
-`define KWS_DW4_HO       5
+`define KWS_DW4_HO       3
 `define KWS_DW4_WO       13
 `define KWS_DW4_STRIDE   1
 `define KWS_DW4_PAD      1
 `define KWS_DW4_NG       2
-`define KWS_DW4_PIXELS   65
+`define KWS_DW4_PIXELS   39
 `define KWS_DW4_WROM_BASE 269
 `define KWS_DW4_CH_BASE  320
-`define KWS_DW4_OUT_WORDS 130
+`define KWS_DW4_OUT_WORDS 78
 
 // ---- pw4 (pw) ----
 `define KWS_PW4_KIND_PW   1
 `define KWS_PW4_CIN      64
 `define KWS_PW4_COUT     64
-`define KWS_PW4_HI       5
+`define KWS_PW4_HI       3
 `define KWS_PW4_WI       13
-`define KWS_PW4_HO       5
+`define KWS_PW4_HO       3
 `define KWS_PW4_WO       13
 `define KWS_PW4_STRIDE   1
 `define KWS_PW4_PAD      0
 `define KWS_PW4_NG       2
-`define KWS_PW4_PIXELS   65
+`define KWS_PW4_PIXELS   39
 `define KWS_PW4_WROM_BASE 287
 `define KWS_PW4_CH_BASE  384
-`define KWS_PW4_OUT_WORDS 130
+`define KWS_PW4_OUT_WORDS 78
 
 // ---- gap (gap) ----
 `define KWS_GAP_KIND_GAP  1
 `define KWS_GAP_CIN      64
 `define KWS_GAP_COUT     64
-`define KWS_GAP_HI       5
+`define KWS_GAP_HI       3
 `define KWS_GAP_WI       13
 `define KWS_GAP_HO       1
 `define KWS_GAP_WO       1

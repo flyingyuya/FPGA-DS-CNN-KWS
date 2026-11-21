@@ -25,10 +25,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(ROOT, "software"))
 from features import dct_matrix                                    # noqa: E402
+from config import N_MELS                                          # noqa: E402
 
 Q = 15
 SCALE = 1 << Q
-N = 40
+N = N_MELS      # square: N_MFCC == N_MELS by construction
 F = 8                                   # log is Q8.8
 
 

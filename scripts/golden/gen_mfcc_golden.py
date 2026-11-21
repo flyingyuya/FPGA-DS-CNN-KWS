@@ -28,7 +28,7 @@ def main():
 
     A, B = R.norm_table()
     with open(os.path.join(ddir, "mfcc_norm.mem"), "w") as fh:
-        for c in range(40):
+        for c in range(len(A)):
             fh.write(f"{(int(B[c]) & 0xFFFFFFFF):08x}{(int(A[c]) & 0xFFFFFF):06x}\n")
     print(f"  norm table: |A|max {int(np.abs(A).max())} (Q?.20), "
           f"|B|max {int(np.abs(B).max())}")

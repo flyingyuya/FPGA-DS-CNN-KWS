@@ -23,9 +23,13 @@ import fft_dsp as F                                                   # noqa: E4
 import gen_fft_pow_vectors as GV                                      # noqa: E402
 import gen_log_lut as GL                                              # noqa: E402
 from features import dct_matrix                                       # noqa: E402
+import config as _C                                                   # noqa: E402
 
-N_FFT, WIN, HOP, NFRAME = 512, 480, 160, 101
-N_MELS, N_MFCC = 40, 40
+# geometry from the training front end, never literals (this file hardcoded
+# 40x101 and broke as soon as N_MELS changed)
+N_FFT, WIN, HOP = _C.N_FFT, _C.WIN_LENGTH, _C.HOP_LENGTH
+NFRAME = _C.N_FRAMES_USED
+N_MELS, N_MFCC = _C.N_MELS, _C.N_MFCC
 LOG_FRAC, NORM_FRAC = 8, 20
 CLIP = 16000
 

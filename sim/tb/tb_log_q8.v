@@ -10,11 +10,12 @@
 // Run from the project root:  bash sim/run.sh log
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module tb_log_q8;
 
     localparam integer MEL_BITS = 54;
-    localparam integer NFILT    = 40;
+    localparam integer NFILT    = `KWS_H_IN;
     localparam integer NVEC     = 6;
     localparam real    CLK_NS   = 20.833;
 

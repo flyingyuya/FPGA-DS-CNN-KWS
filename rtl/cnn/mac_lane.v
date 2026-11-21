@@ -36,9 +36,10 @@
 // irrelevant -- any pipelining the engines do is numerically safe.
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module mac_lane #(
-    parameter integer W_BITS     = 8,
+    parameter integer W_BITS     = `KWS_W_BITS,
     parameter integer ACT_BITS   = 8,
     parameter integer ACC_BITS   = 24,
     parameter integer SHIFT_BITS = 4

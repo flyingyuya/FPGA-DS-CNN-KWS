@@ -30,7 +30,7 @@ from torch.utils.data import Dataset
 from config import (N_FRAMES_USED,ARTIFACTS, BG_NOISE_PROB, BG_NOISE_VOL, CACHE_DIR,
                     CLIP_SAMPLES, DATA_ROOT, LABELS, NUM_CLASSES, SAMPLE_RATE,
                     GSCD_DIR, GSCD_URL, SEED, SILENCE_IDX, SILENCE_PCT, SPEC_AUG,
-                    TIME_SHIFT_MS, UNKNOWN_IDX, UNKNOWN_PCT, WANTED_WORDS)
+                    TIME_SHIFT_MS, UNKNOWN_IDX, UNKNOWN_PCT, WANTED_WORDS, N_MFCC)
 from features import MFCC, normalise
 
 SPLITS = ("train", "val", "test")
@@ -296,8 +296,8 @@ def compute_feature_stats(batch_size=512, path=STATS_JSON):
     """Per-coefficient MFCC mean / std over the (un-augmented) training set."""
     ds = AudioDataset("train")
     mfcc = MFCC()
-    s1 = torch.zeros(40, dtype=torch.float64)
-    s2 = torch.zeros(40, dtype=torch.float64)
+    s1 = torch.zeros(N_MFCC, dtype=torch.float64)   # was a hardcoded 40: it
+    s2 = torch.zeros(N_MFCC, dtype=torch.float64)   # broke as soon as N_MFCC != 40
     n = 0
     for i in range(0, len(ds), batch_size):
         x = torch.from_numpy(np.array(ds.audio[i:i + batch_size])).float() / 32768.0

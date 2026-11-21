@@ -1,41 +1,34 @@
 // =============================================================================
 // mfcc_top.v -- the whole on-chip MFCC front end: 1 s of 16 kHz PCM in,
-//               40 x 101 UINT8 codes out (FMEM write port).
+//               KWS_H_IN x KWS_W_IN UINT8 codes out (FMEM write port).
 //
 //   sample buffer (16000 x 16)
 //     -> per frame f (0..100): 512-point windowed frame in Q1.23
 //          tap t < 480 : x = (samp[reflect(f*160 + t - 256)] * hann[t] + 64) >>> 7
 //          tap t >= 480: x = 0
 //     -> fft_core (N=512) -> 256 power bins (Q2.46)
-//     -> mel_fb           -> 40 mel energies
-//     -> log_q8           -> 40 logs (Q8.8)
-//     -> dct40            -> 40 DCT coefficients (Q9.8)
+//     -> mel_fb           -> NNORM mel energies
+//     -> log_q8           -> NNORM logs (Q8.8)
+//     -> dct40            -> NNORM DCT coefficients (Q9.8)
 //     -> code = clamp((A[c]*dct + B[c] + 2^19) >> 20, 0, 255) -> FMEM[c*101 + f]
 //
 // Reflect padding matches torch.stft(center=True, pad_mode="reflect"), so the map
 // is what the model was trained on.
 //
-// IMPORTANT (this bit me three times in this project): every memory/ROM read that
-// feeds a multiplier must be addressed COMBINATIONALLY from the loop counters, or
-// by a register written at least two states earlier.  A register written in the
-// same state that the memory samples hands the MAC the previous element -- which
-// produced exactly ±1..2 LSB differences that look like rounding noise (see the
-// mel, dct and sample-buffer fixes in docs/refactor-plan.md sec. 18-21).
-//
-// Cost: ~512 (feed, 2 cycles/tap) + 4608 (FFT) + 937 (mel) + 40 (log)
-//       + 3202 (DCT) + 40 (writes) ~= 9,350 cycles per frame; x101 = 19.6 ms for
-//       the whole map.  Sustained real-time only needs one frame per 10 ms hop.
+// Cost scales with NNORM: at NNORM=20 a frame is ~7.6k cycles, so the whole
+// map (NFRAME=101) takes 768,913 cycles = 16.0 ms at 48 MHz.  Sustained real-time only needs one frame per 10 ms hop.
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module mfcc_top #(
-    parameter integer NSAMP     = 16000,
-    parameter integer NFRAME    = 101,
+    parameter integer NSAMP     = 16000,          // 1 s at 16 kHz (model input spec)
+    parameter integer NFRAME    = `KWS_W_IN,
     parameter integer NFFT      = 512,
     parameter integer WIN       = 480,
     parameter integer HOP       = 160,
     parameter integer LOG2N     = 9,
-    parameter integer NNORM     = 40,
+    parameter integer NNORM     = `KWS_H_IN,
     parameter integer NORM_FRAC = 20,
     parameter integer SKIP_LOAD = 0,
     parameter         MEM_DIR   = "mem"
@@ -46,6 +39,7 @@ module mfcc_top #(
     // ---- sample stream (16-bit PCM, 16 kHz) --------------------------------
     input  wire                s_valid,
     input  wire signed [15:0]  s_data,
+    input  wire                freeze,  // 1 = stop capturing (a run is in progress)
     output wire                s_ready,
 
     // ---- control -----------------------------------------------------------
@@ -55,30 +49,12 @@ module mfcc_top #(
 
     // ---- MFCC map out (FMEM write port) ------------------------------------
     output reg                 mfcc_we,
-    output reg  [11:0]         mfcc_addr,
+    output reg  [`KWS_IN_ADDR_W-1:0] mfcc_addr,
     output reg  [7:0]          mfcc_data,
 
     // ---- observability -----------------------------------------------------
     output reg  [31:0]         cycles_o,
-    output reg  [7:0]          frame_o,
-
-    // ---- debug: every stage's output for frame 0, one value per write ------
-    // Added after several rounds of single-value probing proved useless for
-    // locating a 26%-of-codes +-1..3 residue: the only reliable way is a whole
-    // frame at every stage.  stage 0 = fft power (256), 1 = mel (40),
-    // 2 = log (40), 3 = dct (40).
-    output reg                 dbg_we,
-    output reg  [1:0]          dbg_stage,
-    output reg  [11:0]         dbg_addr,
-    output reg  [47:0]         dbg_data,
-    // stage snapshots for frame 0 (comparison against sim/reference_model's
-    // intermediate values; a testbench cannot read the nested power buffer
-    // reliably under iverilog)
-    output reg                 dbg_taken, dbg_taken2,
-    output reg  [47:0]         dbg_pw0,
-    output reg  [53:0]         dbg_mel0,
-    output reg  [15:0]         dbg_log0,
-    output reg  [23:0]         dbg_dct0
+    output reg  [7:0]          frame_o
 );
 
     localparam [3:0] S_IDLE = 4'd0, S_LOAD = 4'd1, S_WA = 4'd2,  S_WB   = 4'd3,
@@ -106,26 +82,35 @@ module mfcc_top #(
     // =========================================================================
     // sample buffer
     // =========================================================================
+    // The sample buffer is a 16000-entry RING, written continuously and frozen
+    // while a run is in progress.  Freezing costs the ~21 ms of audio thatarrives 
+    // during the MFCC run, shrinks as the MFCC latency is reduced.
+    //
+    // `base` is the write pointer latched at `start`, i.e. the oldest sample;
+    // reads are offset by it and wrap modulo NSAMP.
     (* ram_style = "block" *) reg signed [15:0] samp [0:NSAMP-1];
     reg [13:0]        wr_ptr;
+    reg [13:0]        base;
     // samp_re MUST be combinational: as a register it is high during S_WB, by
-    // which time t_idx has already advanced, so samp_q ended up holding
-    // samp[ridx(t+1)] -- a whole frame shifted by one sample.
+    // which time t_idx has already advanced, so samp_q ended up holding samp[ridx(t+1)].
     wire              samp_re = (state == S_WA);
     reg signed [15:0] samp_q;
 
+    // ring offset: (base + reflected index) modulo NSAMP
+    wire [14:0] ridx_sum  = {1'b0, base} + {1'b0, ridx};
+    wire [13:0] ridx_ring = (ridx_sum >= NSAMP) ? (ridx_sum - NSAMP) : ridx_sum[13:0];
+
+    // memory write stays out of the reset branch so Vivado can infer BRAM
     always @(posedge clk) begin
-        if (s_valid && buf_ready) samp[wr_ptr] <= s_data;
-        if (samp_re)              samp_q   <= samp[ridx];   // combinational address
+        if (s_valid && !freeze) samp[wr_ptr] <= s_data;
+        if (samp_re)            samp_q <= samp[ridx_ring];
     end
-    assign s_ready = buf_ready;
+    assign s_ready = ~freeze;
 
     // =========================================================================
     // window ROM and the normalisation ROM (combinational reads)
     // =========================================================================
-    wire [8:0]  win_addr = t_idx[8:0];   // combinational: the ROM is a comb read
-                                        // and registered addresses have burned this
-                                        // project six times
+    wire [8:0]  win_addr = t_idx[8:0];   // the ROM MUST be a combinational read
     wire [15:0] win_q;
     window_rom u_win (.addr(win_addr), .dout(win_q));
 
@@ -208,62 +193,11 @@ module mfcc_top #(
     // =========================================================================
     // FSM
     // =========================================================================
-    always @(posedge clk) begin
-        if (frame == 8'd0) begin
-            if (mel_valid && mel_idx == 6'd0) dbg_mel0 <= mel_data;
-            if (log_valid && n_idx == 6'd0)   dbg_log0 <= log_data;
-            if (dct_valid && dct_idx == 6'd0) dbg_dct0 <= dct_data;
-            // capture the FFT's own output for bins 0/1/2 (before the mel buffer),
-            // and the mel buffer contents once everything is written
-            if (fft_valid) begin
-                if (bins == 9'd0 && !dbg_taken) begin dbg_pw0 <= fft_pow; dbg_taken <= 1'b1; end
-                if (bins == 9'd1 && !dbg_taken2) begin dbg_mel0 <= {6'd0, fft_pow}; dbg_taken2 <= 1'b1; end
-            end
-            if (state == S_FFT && !fft_busy && bins >= NFFT/2)
-                dbg_log0 <= u_mel.pw_mem[0][15:0];
-        end
-    end
-
-    // ---------------------------------------------------------------------
-    // DEBUG ONLY: shadow copy of the power bins + a post-hoc dump.
-    //
-    // Live probing of fft_pow / mel_data from a neighbouring always block kept
-    // reading X (three separate rounds of it), so instead of sampling a stream
-    // we keep a copy and walk it with a counter afterwards.  No valid/data
-    // alignment, no "new value or old value" question.
-    // Remove this block (and the shadow memory, ~1.5 BRAM) before tape-out.
-    // ---------------------------------------------------------------------
-    (* ram_style = "block" *) reg [47:0] pw_shadow [0:NFFT/2-1];
-    always @(posedge clk) if (fft_valid) pw_shadow[fft_idx] <= fft_pow;
-
-    reg        dmp_go;
-    reg [8:0]  dmp_cnt;
-
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            dbg_we <= 1'b0; dbg_stage <= 2'd0; dbg_addr <= 12'd0; dbg_data <= 48'd0;
-            dmp_go <= 1'b0; dmp_cnt <= 9'd0;
-        end else begin
-            dbg_we <= 1'b0;
-            if (frame == 8'd1 && mel_start) begin
-                dmp_go  <= 1'b1;              // frame 0's mel has just been kicked off
-                dmp_cnt <= 9'd0;
-            end else if (dmp_go) begin
-                dbg_we    <= 1'b1;
-                dbg_stage <= 2'd0;
-                dbg_addr  <= {4'd0, dmp_cnt[7:0]};
-                dbg_data  <= pw_shadow[dmp_cnt[7:0]];
-                dmp_cnt   <= dmp_cnt + 9'd1;
-                if (dmp_cnt == NFFT/2 - 1) dmp_go <= 1'b0;
-            end
-        end
-    end
-
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= S_IDLE; busy <= 1'b0; done <= 1'b0; buf_ready <= 1'b0;
             frame <= 8'd0; t_idx <= 10'd0; n_idx <= 6'd0; bins <= 9'd0;
-            wr_ptr <= 14'd0; cyc <= 32'd0;
+            wr_ptr <= 14'd0; base <= 14'd0; cyc <= 32'd0;
             fft_we <= 1'b0; fft_in <= 24'sd0;
             mel_start <= 1'b0;
             log_we <= 1'b0; log_mel <= 54'd0;
@@ -280,6 +214,8 @@ module mfcc_top #(
             dct_start <= 1'b0;
             mfcc_we   <= 1'b0;
             if (busy) cyc <= cyc + 1'b1;
+            if (s_valid && !freeze)
+                wr_ptr <= (wr_ptr == NSAMP - 1) ? 14'd0 : wr_ptr + 14'd1;
 
             case (state)
             S_IDLE: begin
@@ -288,21 +224,14 @@ module mfcc_top #(
                     busy  <= 1'b1;
                     frame <= 8'd0;
                     cyc   <= 32'd0;
-                    wr_ptr<= 14'd0;
+                    base  <= wr_ptr;          // oldest sample = where the next
+                                              // write would have gone
                     state <= (SKIP_LOAD != 0) ? S_WA : S_LOAD;
                 end
             end
 
-            S_LOAD: begin
-                buf_ready <= 1'b1;
-                if (s_valid) begin
-                    wr_ptr <= wr_ptr + 1'b1;
-                    if (wr_ptr == NSAMP - 1) begin
-                        buf_ready <= 1'b0;
-                        state     <= S_WA;
-                    end
-                end
-            end
+            // with a ring there is nothing to load: the buffer is already full
+            S_LOAD: state <= S_WA;
 
             // issue the sample read and the window address for tap t_idx
             S_WA: begin

@@ -14,14 +14,16 @@
 // Run from the project root:  bash sim/run.sh mfcc [+dump]
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module tb_mfcc_top;
 
     localparam integer NSAMP  = 16000;
-    localparam integer NFRAME = 101;
-    localparam integer NCODE  = 4040;
+    localparam integer NFRAME = `KWS_W_IN;
+    localparam integer NCODE  = `KWS_IN_PIXELS;
     localparam integer NVEC   = 3;
     localparam real    CLK_NS = 20.833;
+    localparam integer STREAM_MODE = 1;   // 1 = feed samples through s_valid
 
     reg clk = 1'b0;
     reg rst_n = 1'b0;
@@ -33,19 +35,18 @@ module tb_mfcc_top;
     wire [11:0] mfcc_addr;
     wire [7:0]  mfcc_data;
     wire [31:0] cycles_o;
-    wire        dbg_we;
-    wire [1:0]  dbg_stage;
-    wire [11:0] dbg_addr;
-    wire [47:0] dbg_data;
+    reg         st_valid = 1'b0;
+    reg  signed [15:0] st_data = 16'sd0;
+    integer     fin;
     wire [7:0]  frame_o;
 
-    mfcc_top #(.NSAMP(NSAMP), .NFRAME(NFRAME), .SKIP_LOAD(1)) u_mfcc (
+
+    mfcc_top #(.NSAMP(NSAMP), .NFRAME(NFRAME), .SKIP_LOAD(STREAM_MODE)) u_mfcc (
         .clk(clk), .rst_n(rst_n),
-        .s_valid(1'b0), .s_data(16'sd0), .s_ready(),
+        .s_valid(st_valid), .s_data(st_data), .s_ready(),
         .start(start), .busy(busy), .done(done),
         .mfcc_we(mfcc_we), .mfcc_addr(mfcc_addr), .mfcc_data(mfcc_data),
-        .cycles_o(cycles_o), .frame_o(frame_o),
-        .dbg_we(dbg_we), .dbg_stage(dbg_stage), .dbg_addr(dbg_addr), .dbg_data(dbg_data));
+        .cycles_o(cycles_o), .frame_o(frame_o));
 
     reg [8*24-1:0] names [0:NVEC-1];
     reg [7:0]      exp_mem [0:NCODE-1];
@@ -80,10 +81,6 @@ module tb_mfcc_top;
                      frame_d, t_idx_d, ridx_d, samp_q_d, wprod_d);
     end
 
-    integer fd;
-    always @(posedge clk) if (rst_n && dbg_we)
-        $fwrite(fd, "%0d %0d %0h\n", dbg_stage, dbg_addr, dbg_data);
-
     always @(posedge clk) begin
         if (rst_n && mfcc_we) begin
             got_mem[mfcc_addr] <= mfcc_data;
@@ -101,6 +98,15 @@ module tb_mfcc_top;
             for (i = 0; i < NCODE; i = i + 1) got_mem[i] = 8'hxx;
             nwrite = 0;
 
+            if (STREAM_MODE != 0) begin
+                for (i = 0; i < NSAMP; i = i + 1) begin
+                    @(negedge clk);
+                    st_valid = 1'b1;
+                    st_data  = $signed(u_mfcc.samp[i]);
+                end
+                @(negedge clk);
+                st_valid = 1'b0;
+            end
             @(negedge clk);
             start = 1'b1;
             @(negedge clk);
@@ -148,12 +154,10 @@ module tb_mfcc_top;
             $dumpfile("sim/build/tb_mfcc.vcd");
             $dumpvars(0, tb_mfcc_top);
         end
-        fd = $fopen("sim/build/mfcc_stage.txt", "w");
         repeat (3) @(negedge clk);
         rst_n = 1'b1;
         @(negedge clk);
         for (v = 0; v < NVEC; v = v + 1) run_vector(v);
-        $fclose(fd);
         if (errors_total == 0)
             $display("MFCC_TOP: %0d clips x %0d codes bit-exact", NVEC, NCODE);
         else

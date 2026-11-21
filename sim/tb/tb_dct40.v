@@ -8,10 +8,11 @@
 // Run from the project root:  bash sim/run.sh dct
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module tb_dct40;
 
-    localparam integer N     = 40;
+    localparam integer N     = `KWS_H_IN;   // N_MFCC == N_MELS
     localparam integer NVEC  = 6;
     localparam integer DBITS = 24;
     localparam real    CLK_NS = 20.833;

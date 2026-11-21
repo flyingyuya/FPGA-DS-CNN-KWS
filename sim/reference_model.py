@@ -29,8 +29,15 @@ string is lane i.
 
 import json
 import os
+import sys
 
 import numpy as np
+
+# The geometry must follow the training front end, not a literal: this file used
+# to hardcode 40x101 and raised IndexError as soon as N_MELS changed.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "software"))
+import config as _C                                                     # noqa: E402
 
 # ---------------------------------------------------------------------------
 # global widths -- must equal the RTL parameters
@@ -43,10 +50,14 @@ SHIFT_BITS = 4
 ACT_QMAX = (1 << ACT_BITS) - 1
 W_QMAX = (1 << (W_BITS - 1)) - 1
 SHIFT_MAX = (1 << SHIFT_BITS) - 1
-BANK_WORDS = 1024          # 32 channels x 1024 pixels = 32 KB per bank
+# Bank depth follows the largest layer output, rounded up to a power of two.
+# It used to be hardcoded 1024 (sized for the 40x101 model); with a 20x101 input
+# the largest layer is the stem output 10x51 = 510, so 512 words suffice and the
+# activation buffer halves in BRAM.  This is where the memory saving comes from,
+# so it must be derived, not literal.
 
-NUM_CLASSES = 12
-H_IN, W_IN = 40, 101
+NUM_CLASSES = _C.NUM_CLASSES
+H_IN, W_IN = _C.H_IN, _C.W_IN
 GAP_SHIFT = 6
 LABELS = ["_silence_", "_unknown_", "yes", "no", "up", "down",
           "left", "right", "on", "off", "stop", "go"]
@@ -55,19 +66,40 @@ LABELS = ["_silence_", "_unknown_", "yes", "no", "up", "down",
 # layer table: (name, kind, cin, cout, hi, wi, ho, wo, stride, pad)
 # kind: std = 3x3 standard conv, dw = 3x3 depthwise, pw = 1x1, gap, fc
 # ---------------------------------------------------------------------------
-_SPEC = [
-    ("stem", "std", 1, 32, 40, 101, 20, 51, 2, 1),
-    ("dw1", "dw", 32, 32, 20, 51, 10, 26, 2, 1),
-    ("pw1", "pw", 32, 32, 10, 26, 10, 26, 1, 0),
-    ("dw2", "dw", 32, 32, 10, 26, 5, 13, 2, 1),
-    ("pw2", "pw", 32, 64, 5, 13, 5, 13, 1, 0),
-    ("dw3", "dw", 64, 64, 5, 13, 5, 13, 1, 1),
-    ("pw3", "pw", 64, 64, 5, 13, 5, 13, 1, 0),
-    ("dw4", "dw", 64, 64, 5, 13, 5, 13, 1, 1),
-    ("pw4", "pw", 64, 64, 5, 13, 5, 13, 1, 0),
-    ("gap", "gap", 64, 64, 5, 13, 1, 1, 1, 0),
-    ("fc", "fc", 64, 12, 1, 1, 1, 1, 1, 0),
+_ARCH = [
+    # (name, kind, cin, cout, stride, pad) -- spatial sizes are derived below
+    ("stem", "std", 1, 32, 2, 1),
+    ("dw1", "dw", 32, 32, 2, 1),
+    ("pw1", "pw", 32, 32, 1, 0),
+    ("dw2", "dw", 32, 32, 2, 1),
+    ("pw2", "pw", 32, 64, 1, 0),
+    ("dw3", "dw", 64, 64, 1, 1),
+    ("pw3", "pw", 64, 64, 1, 0),
+    ("dw4", "dw", 64, 64, 1, 1),
+    ("pw4", "pw", 64, 64, 1, 0),
+    ("gap", "gap", 64, 64, 1, 0),
+    ("fc", "fc", 64, NUM_CLASSES, 1, 0),
 ]
+
+
+def _derive_spec():
+    h, w, out = H_IN, W_IN, []
+    for (name, kind, cin, cout, stride, pad) in _ARCH:
+        if kind in ("std", "dw"):
+            ho = (h + 2 * pad - 3) // stride + 1
+            wo = (w + 2 * pad - 3) // stride + 1
+        else:                       # pw keeps the size, gap/fc collapse to 1x1
+            ho, wo = (h, w) if kind == "pw" else (1, 1)
+        out.append((name, kind, cin, cout, h, w, ho, wo, stride, pad))
+        h, w = ho, wo
+    return out
+
+
+_SPEC = _derive_spec()
+
+# the bank stores a layer's OUTPUT; the stems' 20x101 is the FMEM, not a bank
+BANK_WORDS = 1 << max(1, int(np.ceil(np.log2(
+    max(l[6] * l[7] for l in _SPEC)))))
 
 
 def _ng(c):
@@ -336,7 +368,7 @@ def emit_vh(hw, path):
         f"`define KWS_H_IN         {H_IN}",
         f"`define KWS_W_IN         {W_IN}",
         f"`define KWS_IN_PIXELS    {H_IN * W_IN}",
-        f"`define KWS_IN_ADDR_W    13",
+        f"`define KWS_IN_ADDR_W    {int(np.ceil(np.log2(H_IN * W_IN)))}",   # 4040 -> 12
         f"`define KWS_ZP_IN        {int(hw['stem'].get('zp_in', 0))}", "",
         "// ---- memories ----",
         f"`define KWS_BANK_WORDS   {BANK_WORDS}",

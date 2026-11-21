@@ -22,9 +22,10 @@
 //   dct[c] : 24 bit signed, Q9.8
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module dct40 #(
-    parameter integer N        = 40,
+    parameter integer N        = `KWS_H_IN,   // N_MFCC == N_MELS
     parameter integer LOG_FRAC = 8,
     parameter integer DCT_BITS = 24,
     parameter integer ACC_BITS = 40,

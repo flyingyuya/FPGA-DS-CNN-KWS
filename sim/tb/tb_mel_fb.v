@@ -12,6 +12,7 @@
 // Run from the project root:  bash sim/run.sh mel
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module tb_mel_fb;
 
@@ -19,7 +20,7 @@ module tb_mel_fb;
     localparam integer LOG2N = 9;
     localparam integer DW    = 24;
     localparam integer NBIN  = N / 2;
-    localparam integer NFILT = 40;
+    localparam integer NFILT = `KWS_H_IN;   // mel bands = input height
     localparam integer MF_BITS = 54;
     localparam integer NVEC  = 6;
     localparam real    CLK_NS = 20.833;

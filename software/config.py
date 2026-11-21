@@ -73,8 +73,10 @@ CLIP_SAMPLES = 16000
 N_FFT = 512
 WIN_LENGTH = 480
 HOP_LENGTH = 160
-N_MELS = 40
-N_MFCC = 40
+N_MELS = 20  # chosen by the feature-dimension ablation (docs §44):
+             # 20 bands cost 0.03 val points vs 40, but halve the input
+             # (4040->2020), the activation buffer (1020->510 <512) and the latency
+N_MFCC = 20  # = N_MELS: keep every mel band as a cepstral coefficient
 F_MIN, F_MAX = 20.0, 7600.0
 # Context actually fed to the network, in MFCC frames.  The map is computed over
 # the whole 1 s clip and then cropped to the centred N_FRAMES_USED frames, so this

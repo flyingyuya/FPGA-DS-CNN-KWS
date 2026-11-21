@@ -30,11 +30,12 @@
 //   cycle t+1 : both memories' registered outputs are valid -> multiply, accumulate
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 `include "mel_rom.v"
 
 module mel_fb #(
     parameter integer NBIN    = 256,
-    parameter integer NFILT   = 40,
+    parameter integer NFILT   = `KWS_H_IN,
     parameter integer MF_BITS = 54          // mel accumulator width
 ) (
     input  wire                 clk,

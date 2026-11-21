@@ -86,7 +86,7 @@ run_wm() {
 board_src=(-DSIM -I rtl -I rtl/cnn -I rtl/memory -I rtl/common
            -I rtl/preprocessing -I rtl/wm8960
            rtl/board_top.v rtl/common/clk_gen.v rtl/common/uart_tx.v
-           rtl/common/i2s_rx.v rtl/common/audio_fifo.v
+           rtl/common/i2s_rx.v rtl/common/audio_fifo.v rtl/common/key_debounce.v
            rtl/wm8960/i2c_bit_shift.v rtl/wm8960/i2c_control.v
            rtl/wm8960/WM8960_init_table.v rtl/wm8960/WM8960_init.v
            rtl/preprocessing/fft_core.v rtl/preprocessing/fft_addr_gen.v

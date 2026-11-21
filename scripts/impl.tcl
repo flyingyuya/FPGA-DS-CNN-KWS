@@ -27,6 +27,7 @@ read_verilog [list \
     rtl/memory/const_loader.v \
     rtl/memory/fmem.v \
     rtl/common/i2s_rx.v \
+    rtl/common/key_debounce.v \
     rtl/common/audio_fifo.v \
     rtl/wm8960/i2c_bit_shift.v \
     rtl/wm8960/i2c_control.v \

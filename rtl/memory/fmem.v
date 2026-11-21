@@ -38,6 +38,11 @@ module fmem #(
     output reg                     load_busy,
     output reg                     load_done,
 
+    // ---- direct map write (MFCC front end) --------------------------------
+    input  wire                    ext_we,
+    input  wire [ADDR_W-1:0]       ext_addr,
+    input  wire [ACT_BITS-1:0]     ext_data,
+
     // ---- read port (stem) --------------------------------------------------
     input  wire                    re,
     input  wire [ADDR_W-1:0]       raddr,
@@ -53,9 +58,17 @@ module fmem #(
     assign s_ready = load_busy;
 
     // simple dual-port memory: write at `wr`, read at `raddr`
+    // ONE write port with muxed address/data.  Writing it as
+    //   if (mem_we) mem[wr] <= s_data; else if (ext_we) mem[ext_addr] <= ...
+    // looks equivalent but Vivado counts two write ports, cannot map them onto a
+    // simple dual-port BRAM, and silently falls back to LUTRAM.
+    wire                we = mem_we | ext_we;
+    wire [ADDR_W-1:0]   wa = mem_we ? wr : ext_addr;
+    wire [ACT_BITS-1:0] wd = mem_we ? s_data : ext_data;
+
     always @(posedge clk) begin
-        if (mem_we) mem[wr] <= s_data;
-        if (re)     rdata  <= mem[raddr];
+        if (we) mem[wa] <= wd;
+        if (re) rdata   <= mem[raddr];
     end
 
     always @(posedge clk or negedge rst_n) begin

@@ -11,10 +11,11 @@ import os
 
 import torch
 
-from config import CKPT_FP32, CKPT_QAT, LABELS, PRECISION
+from config import CKPT_FP32, CKPT_QAT, IN_CLIP_HI, IN_CLIP_LO, LABELS, PRECISION
+from features import input_qparams
 from data import build_pipeline
-from export_mem import int_accuracy, quantised_split
-from int_model import IntDSCNN, build_hw_qparams
+from export_mem import quantised_split
+from int_model import IntDSCNN, accuracy
 from train import evaluate_model, load_fp32, load_qat, make_loader, pick_device
 
 
@@ -44,9 +45,10 @@ def main():
         rows.append(("FP32 (BN folded, QAT weights)", evaluate_model(qm, dl, pipe, dev)[0]))
         qm.set_quant(True)
         rows.append((f"QAT fake-quant {PRECISION}", evaluate_model(qm, dl, pipe, dev)[0]))
-        q = build_hw_qparams(qm.float_params(), qm.act_ranges(), verbose=False)
-        xq, y = quantised_split(a.split, pipe, q["sa"]["input"], q["zp"]["input"], dev)
-        acc, conf, _ = int_accuracy(IntDSCNN(q, dev), xq, y)
+        q = qm.hw_params()
+        s_in, zp_in = input_qparams(IN_CLIP_LO, IN_CLIP_HI)
+        xq, y = quantised_split(a.split, pipe, s_in, zp_in, dev)
+        acc, conf, _ = accuracy(IntDSCNN(q, dev), xq, y)
         rows.append((f"bit-exact {PRECISION} accelerator", acc))
     print(f"\n{a.split} split accuracy")
     for name, acc in rows:

@@ -47,20 +47,21 @@
 //   cycle t+2 : if that was a job's last tap, drain the bank and write it back
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module conv_engine #(
-    parameter integer LANES       = 32,
-    parameter integer ACT_BITS    = 8,
-    parameter integer W_BITS      = 8,
-    parameter integer ACC_BITS    = 24,
-    parameter integer SHIFT_BITS  = 4,
-    parameter integer BANK_ADDR_W = 10,
-    parameter integer FMEM_ADDR_W = 12,
-    parameter integer WROM_ADDR_W = 10,
-    parameter integer CH_ADDR_W   = 10,
+    parameter integer LANES       = `KWS_LANES,
+    parameter integer ACT_BITS    = `KWS_ACT_BITS,
+    parameter integer W_BITS      = `KWS_W_BITS,
+    parameter integer ACC_BITS    = `KWS_ACC_BITS,
+    parameter integer SHIFT_BITS  = `KWS_SHIFT_BITS,
+    parameter integer BANK_ADDR_W = `KWS_BANK_ADDR_W,
+    parameter integer FMEM_ADDR_W = `KWS_IN_ADDR_W,
+    parameter integer WROM_ADDR_W = `KWS_WROM_ADDR_W,
+    parameter integer CH_ADDR_W   = `KWS_CH_ADDR_W,   // was 10, macro says 9
     parameter integer DIM_W       = 8,
-    parameter integer LANE_AW     = 5,
-    parameter integer NUM_CLASSES = 12,
+    parameter integer LANE_AW     = $clog2(`KWS_LANES),
+    parameter integer NUM_CLASSES = `KWS_NUM_CLASSES,
     parameter integer LOGIT_BITS  = 16
 ) (
     input  wire                          clk,

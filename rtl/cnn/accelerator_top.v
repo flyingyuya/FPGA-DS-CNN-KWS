@@ -42,7 +42,7 @@ module accelerator_top #(
     parameter integer BANK_ADDR_W = `KWS_BANK_ADDR_W,
     parameter integer WROM_ADDR_W = `KWS_WROM_ADDR_W,
     parameter integer CH_ADDR_W   = `KWS_CH_ADDR_W,
-    parameter integer FMEM_ADDR_W = 12,
+    parameter integer FMEM_ADDR_W = `KWS_IN_ADDR_W,
     parameter integer DIM_W       = 8,
     parameter integer NUM_CLASSES = `KWS_NUM_CLASSES,
     parameter integer LOGIT_BITS  = 16,
@@ -62,6 +62,11 @@ module accelerator_top #(
     input  wire [ACT_BITS-1:0]           in_data,
     input  wire                          in_last,
     output wire                          in_ready,
+
+    // direct map write (on-chip MFCC), bypasses the stream loader
+    input  wire                          map_we,
+    input  wire [FMEM_ADDR_W-1:0]        map_addr,   // matches fmem's ADDR_W
+    input  wire [ACT_BITS-1:0]           map_data,
 
     // ---- results -----------------------------------------------------------
     output wire [NUM_CLASSES*LOGIT_BITS-1:0] logits_o,
@@ -128,6 +133,7 @@ module accelerator_top #(
     fmem #(.DEPTH(4096), .ADDR_W(FMEM_ADDR_W), .ACT_BITS(ACT_BITS),
            .INIT_FILE({MEM_DIR, "/input/mfcc_class00__silence_.mem"})) u_fmem (
         .clk(clk), .rst_n(rst_n),
+        .ext_we(map_we), .ext_addr(map_addr), .ext_data(map_data),
         .load_start(load_start), .load_len(IN_PIXELS),
         .s_valid(in_valid), .s_data(in_data), .s_last(in_last),
         .s_ready(in_ready), .load_busy(load_busy), .load_done(load_done),

@@ -26,7 +26,7 @@
 module tb_board_top;
 
     localparam integer NSAMP  = 16000;
-    localparam integer NBYTES = 40 * 101;
+    localparam integer NBYTES = `KWS_IN_PIXELS;
     localparam real    CLK_NS = 20.833;      // 48 MHz
     localparam real    BCLK_HALF = 5.0;      // 100 MHz BCLK (simulation only)
     localparam real    BIT_NS = 1.0e9 / 115200.0;
@@ -35,7 +35,7 @@ module tb_board_top;
     always #(CLK_NS/2.0) clk = ~clk;
 
     reg rstn = 1'b0;
-    reg key  = 1'b0;
+    reg key  = 1'b1;   // key_debounce is active-low: released = 1
 
     wire uart_tx;
     wire [1:0] led;
@@ -133,8 +133,10 @@ module tb_board_top;
     reg [7:0] sm [0:NBYTES-1];
     integer   nstream = 0;
     always @(posedge clk) begin
-        if (u_dut.u_accel.in_valid && u_dut.u_accel.in_ready) begin
-            if (nstream < NBYTES) sm[nstream] <= u_dut.u_accel.in_data;
+        // the map now goes straight into FMEM, so watch the MFCC write port
+        // the map now goes straight into FMEM, so watch the MFCC write port
+        if (u_dut.mfcc_we) begin
+            if (u_dut.mfcc_addr < NBYTES) sm[u_dut.mfcc_addr] <= u_dut.mfcc_data;
             nstream <= nstream + 1;
         end
     end
@@ -159,21 +161,34 @@ module tb_board_top;
                  nword, t, nscl, u_dut.seq, u_dut.wm_done);
         repeat (100) @(negedge clk);
 
-        // 2) key press starts the capture
-        key = 1'b1;
-        repeat (40000) @(negedge clk);     // > debounce (341 us = 16.4k clocks)
-        key = 1'b0;
-
-        // 3) play one second of audio (sped up: 100 MHz BCLK)
+        // 2) play one second of audio into the capture ring (sped up: 100 MHz BCLK).
+        //    500 junk samples first so the write pointer is NOT at 0 when the run
+        //    starts -- that exercises the ring wrap in mfcc_top's read address
+        //    (base = 500, the window is still exactly the clip).
+        for (i = 0; i < 500; i = i + 1) send_slot(0, 16'sd0);
         for (i = 0; i < NSAMP; i = i + 1) begin
             send_slot(1, 16'sd0);
             send_slot(0, stim[i]);
         end
         send_slot(1, 16'sd0);
+        repeat (2000) @(negedge clk);
+
+        // 3) NOW press: the last second is already buffered, so the answer comes
+        //    back after snapshot + MFCC + CNN (~22 ms), not after another second
+        //    of recording.  key_debounce needs 20 ms of a stable level and is
+        //    active-low, so a press is driven as 0 here.
+        key = 1'b0;
+        repeat (1_100_000) @(negedge clk);
+        key = 1'b1;
 
         // 4) wait for the UART report
         t = 0;
         while (nrx < 3 && t < 8_000_000) begin @(negedge clk); t = t + 1; end
+
+        // ...and make sure it does not keep repeating (result_valid is a level
+        // in accelerator_top; feeding it straight into the UART resent forever)
+        repeat (200_000) @(negedge clk);
+        if (nrx != 3) $display("  WARNING: %0d UART bytes -- the report repeated", nrx);
 
         nbad = 0;
         for (k = 0; k < NBYTES; k = k + 1)

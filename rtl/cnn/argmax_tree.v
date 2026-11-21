@@ -22,11 +22,12 @@
 //   start ----> i = 1..NUM_CLASSES-1, one step per cycle ----> done
 // =============================================================================
 `timescale 1ns / 1ps
+`include "kws_params.vh"
 
 module argmax_tree #(
-    parameter integer NUM_CLASSES = 12,
+    parameter integer NUM_CLASSES = `KWS_NUM_CLASSES,
     parameter integer LOGIT_BITS  = 16,
-    parameter integer CLS_BITS    = 4
+    parameter integer CLS_BITS    = $clog2(`KWS_NUM_CLASSES)
 ) (
     input  wire                              clk,
     input  wire                              rst_n,

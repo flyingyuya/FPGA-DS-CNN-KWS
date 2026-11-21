@@ -111,34 +111,88 @@ puts " ✅ programmed (volatile -- gone at power-off)"
 
 # ---------------------------------------------------------------------------
 # QSPI flash (optional, survives power-off)
+#
+# The board carries a **W25Q128JVSQ**, not a Spansion s25fl128s.  Picking the
+# wrong cfgmem part fails with
+#     "Flash Programming Unsuccessful: Failure to set flash parameters"
+# which looks like a configuration error but is really "wrong chip model", so
+# candidates are tried in the order that is known to work on this board.
+#
+# The same error also appears if the FPGA is not currently running a design with
+# a STARTUP/SPI core, because program_hw_cfgmem reaches the flash *through* it.
+# Hence: create the cfgmem object, then (re)program the SRAM, then erase/write.
 # ---------------------------------------------------------------------------
 if {$MODE eq "flash"} {
     set BIN [file rootname $BIT].bin
-    write_cfgmem -force -format BIN -interface SPIx4 -size 16 \
-                 -loadbit "up 0x0 $BIT" $BIN
 
-    if {[llength [get_cfgmem_parts -quiet {s25fl128sxxxxxx0-spi-x1_x2_x4}]] == 0} {
-        puts "⚠️  the expected QSPI part is not in the installed part list;"
-        puts "    check the flash on your board before trusting this."
+    puts ""
+    puts "  [1/4] write_cfgmem (QSPI x4, 16 MB)"
+    if {[catch {write_cfgmem -force -format bin -interface SPIx4 -size 16 \
+                    -loadbit "up 0x0 $BIT" $BIN} err]} {
+        puts "❌ write_cfgmem failed: $err"; close_hw_manager; exit 1
     }
-    create_hw_cfgmem -hw_device $DEV [lindex [get_cfgmem_parts \
-        {s25fl128sxxxxxx0-spi-x1_x2_x4}] 0]
+    puts "        $BIN ([expr {[file size $BIN]/1024}] KB)"
+
+    puts "  [2/4] attach the cfgmem object"
+    set CFGMEM_PART ""
+    foreach cand [list \
+            "w25q128bv-spi-x1_x2_x4" \
+            "mt25ql128-spi-x1_x2_x4" \
+            "s25fl128sxxxxxx0-spi-x1_x2_x4"] {
+        if {[llength [get_cfgmem_parts -quiet $cand]] > 0} { set CFGMEM_PART $cand; break }
+    }
+    if {$CFGMEM_PART eq ""} {
+        puts "  ⚠️  no 128 Mb QSPI candidate in the local part library;"
+        puts "      check the flash chip on your board before trusting this."
+        set CFGMEM_PART [lindex [get_cfgmem_parts] 0]
+    }
+    puts "        using $CFGMEM_PART"
+    # on failure the next thing you want is the list of what *is* available
+    catch {
+        set _seen {}
+        foreach pp [get_cfgmem_parts] {
+            if {[string match -nocase "*w25q*" $pp] || [string match -nocase "*128*qspi*" $pp]} {
+                if {[lsearch -exact $_seen $pp] < 0} { lappend _seen $pp }
+            }
+        }
+        if {[llength $_seen] > 0} {
+            puts "        128Mb QSPI candidates in the local library:"
+            foreach pp $_seen { puts "          - $pp" }
+        }
+    }
+
+    if {[llength [get_property PROGRAM.HW_CFGMEM $DEV -quiet]] == 0} {
+        create_hw_cfgmem -hw_device $DEV -mem_dev [lindex [get_cfgmem_parts $CFGMEM_PART] 0]
+    }
     set CFG [get_property PROGRAM.HW_CFGMEM $DEV]
+
     set_property PROGRAM.BLANK_CHECK   0 $CFG
     set_property PROGRAM.ERASE         1 $CFG
     set_property PROGRAM.CFG_PROGRAM   1 $CFG
     set_property PROGRAM.VERIFY        1 $CFG
     set_property PROGRAM.CHECKSUM      0 $CFG
+    set_property PROGRAM.ADDRESS_RANGE {use_file} $CFG
     set_property PROGRAM.FILES         [list $BIN] $CFG
     set_property PROGRAM.PRM_FILE      {} $CFG
     set_property PROGRAM.UNUSED_PIN_TERMINATION {pull-none} $CFG
-    # the design currently in SRAM must contain a working SPI core, which is why
-    # the volatile program above runs first (see the upstream script's note)
-    if {[catch {program_hw_cfgmem -hw_cfgmem $CFG} err]} {
-        puts "❌ flash programming failed: $err"
-    } else {
-        puts " ✅ QSPI flash written and verified"
+
+    puts "  [3/4] program SRAM first (this is the channel to the flash)"
+    set BITS [get_property PROGRAM.HW_CFGMEM_BITFILE $DEV]
+    if {$BITS eq ""} { set BITS $BIT }
+    create_hw_bitstream -hw_device $DEV $BITS
+    if {[catch {program_hw_devices $DEV} err]} {
+        puts "❌ SRAM program failed: $err"; close_hw_manager; exit 1
     }
+    refresh_hw_device $DEV
+
+    puts "  [4/4] erase + write + verify (1-3 minutes, do not unplug)"
+    if {[catch {program_hw_cfgmem -hw_cfgmem $CFG} err]} {
+        puts "❌ flash write failed: $err"; close_hw_manager; exit 1
+    }
+    puts ""
+    puts " ✅ QSPI flash written and verified."
+    puts "    Power-cycle to boot from flash.  Note that JTAG wins over QSPI:"
+    puts "    unplug the JTAG cable before testing the standalone boot."
 }
 
 close_hw_manager

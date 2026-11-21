@@ -44,7 +44,8 @@ module tb_accelerator_top;
     accelerator_top #(.NUM_CLASSES(NUM_CLASSES), .MEM_DIR("mem")) u_accel (
         .clk(clk), .rst_n(rst_n),
         .start(start), .skip_load(skip_load), .busy(busy), .done(done),
-        .in_valid(in_valid), .in_data(in_data), .in_last(in_last), .in_ready(in_ready),
+        .in_valid(in_valid), .in_data(in_data), .in_last(in_last),
+        .map_we(1'b0), .map_addr(12'd0), .map_data(8'd0), .in_ready(in_ready),
         .logits_o(logits_o), .class_o(class_o), .max_o(max_o), .margin_o(margin_o),
         .result_valid(result_valid), .cycles_o(cycles_o), .layer_o(layer_o));
 
