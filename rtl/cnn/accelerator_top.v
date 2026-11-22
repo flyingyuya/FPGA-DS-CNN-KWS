@@ -4,14 +4,14 @@
 //     map write (MFCC) --> FMEM (4096 x 8)          weight ROM, const ROM
 //                              |                              |
 //                              v                              v
-//     +------------------------+------------------+   +--------+--------+
-//     |            bank memory                    |   |  conv_engine    |
-//     | 2 x KWS_BANK_WORDS words x 256 bit, 2 ports+-->+ (fetch FSM +    +--> argmax
-//     | bank bit = address MSB (no read mux!)     |   |  address gen)   |    tree
-//     +------------------------+------------------+   +--------+--------+      |
-//                                                          |          class/margin
-//                                                          v
-//                                                  pe_array(32 lanes)
+//     +------------------------+-------------------+   +--------+--------+
+//     |            bank memory                     |   |  conv_engine    |
+//     | 2 x KWS_BANK_WORDS words x 256 bit, 2 ports+-->+ (fetch FSM +    +--> argmax tree
+//     | bank bit = address MSB (no read mux!)      |   |  address gen)   |         |
+//     +------------------------+-------------------+   +--------+--------+         v
+//                                                              |             class/margin
+//                                                              v
+//                                                      pe_array(32 lanes)
 //
 // Design notes
 // ------------

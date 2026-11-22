@@ -25,10 +25,12 @@ module MMCME2_BASE #(
     parameter real CLKOUT0_DUTY_CYCLE= 0.5,
     parameter real CLKOUT0_PHASE     = 0.0,
     parameter integer DIVCLK_DIVIDE  = 1,
+    parameter integer CLKOUT1_DIVIDE = 48,
     parameter real REF_JITTER1       = 0.010,
     parameter STARTUP_WAIT           = "FALSE"
 ) (
     output wire CLKOUT0,
+    output wire CLKOUT1,
     output wire CLKFBOUT,
     input  wire CLKFBIN,
     input  wire CLKIN1,
@@ -36,6 +38,7 @@ module MMCME2_BASE #(
     input  wire PWRDWN,
     input  wire RST);
     assign CLKOUT0  = CLKIN1;
+    assign CLKOUT1  = CLKIN1;
     assign CLKFBOUT = CLKIN1;
     assign LOCKED   = 1'b1;
 endmodule

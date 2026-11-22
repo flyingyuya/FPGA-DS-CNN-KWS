@@ -99,6 +99,7 @@ board_src=(-DSIM -I rtl -I rtl/cnn -I rtl/memory -I rtl/common
            rtl/cnn/pe_array.v rtl/cnn/conv_engine.v rtl/cnn/argmax_tree.v
            rtl/memory/act_bank.v rtl/memory/weight_rom.v
            rtl/memory/const_loader.v rtl/memory/fmem.v
+           rtl/lcd/lcd_timing.v rtl/lcd/font_rom.v rtl/lcd/text_overlay.v rtl/lcd/word_to_text.v
            sim/tb/tb_board_top.v)
 
 run_board() {
@@ -149,8 +150,11 @@ case "${1:-all}" in
     dct)   run_dct ;;
     wm)    run_wm ;;
     board) run_board ;;
-    i2s)   run_i2s ;;
+    word) iverilog -g2005 -o /tmp/tb_word_to_text.vvp sim/tb/tb_word_to_text.v rtl/lcd/word_to_text.v
+        vvp /tmp/tb_word_to_text.vvp | grep -E "PASS|FAIL" ;;
+
+  i2s)   run_i2s ;;
     mfcc)  run_mfcc ;;
     all)   run_pe; run_conv; run_top; run_fft; run_mel; run_log; run_dct; run_i2s; run_wm; run_mfcc ;;
-    *)   echo "usage: bash sim/run.sh [all|pe|conv|top|fft|mel|log|dct|i2s|mfcc]   (tb_*.v live in sim/)"; exit 1 ;;
+    *)   echo "usage: bash sim/run.sh [all|pe|conv|top|fft|mel|log|dct|word|i2s|mfcc]   (tb_*.v live in sim/)"; exit 1 ;;
 esac

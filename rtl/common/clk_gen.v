@@ -24,7 +24,8 @@ module clk_gen (
     input  wire clk_p,          // 200 MHz differential, pin R4
     input  wire clk_n,          //                             T4
     input  wire rst_async_n,    // board reset key, pin R14
-    output wire clk,            // 48 MHz
+    output wire clk,            // 48 MHz  (system)
+    output wire clk_pix,        // 12.5 MHz (LCD pixel clock)
     output wire rst_n,          // synchronous, released after the MMCM locks
     output wire locked
 );
@@ -32,6 +33,7 @@ module clk_gen (
 `ifdef SIM
     // behavioural stand-in: the testbench is expected to drive clk_p at 48 MHz
     assign clk    = clk_p;
+    assign clk_pix = clk_p;   // simulation: no second clock
     assign locked = 1'b1;
     reg [2:0] rs;
     always @(posedge clk or negedge rst_async_n)
@@ -49,7 +51,7 @@ module clk_gen (
         .IB (clk_n)
     );
 
-    wire clkfb, locked_int, clk_raw;
+    wire clkfb, locked_int, clk_raw, clk_pix_raw;
 
     MMCME2_BASE #(
         .BANDWIDTH         ("OPTIMIZED"),
@@ -57,6 +59,7 @@ module clk_gen (
         .CLKFBOUT_PHASE    (0.0),
         .CLKIN1_PERIOD     (5.000),          // 200 MHz -> 5 ns
         .CLKOUT0_DIVIDE_F  (12.500),         // 600 / 12.5 = 48.000 MHz
+        .CLKOUT1_DIVIDE    (48),             // 600 / 48   = 12.500 MHz (LCD pixels)
         .CLKOUT0_DUTY_CYCLE(0.500),
         .CLKOUT0_PHASE     (0.0),
         .DIVCLK_DIVIDE     (1),
@@ -64,6 +67,7 @@ module clk_gen (
         .STARTUP_WAIT      ("FALSE")
     ) u_mmcm (
         .CLKOUT0  (clk_raw),
+        .CLKOUT1  (clk_pix_raw),
         .CLKFBOUT (clkfb),
         .CLKFBIN  (clkfb),
         .CLKIN1   (clk200),
@@ -76,6 +80,7 @@ module clk_gen (
     // to be instantiated explicitly, otherwise the 48 MHz net is not on a clock
     // route and Vivado either warns or inserts one behind your back.
     BUFG u_bufg (.I (clk_raw), .O (clk));
+    BUFG u_bufg_pix (.I (clk_pix_raw), .O (clk_pix));
 
     assign locked = locked_int;
 

@@ -136,6 +136,10 @@ def main():
                 for cls, margin, ok in decode(buf):
                     if not ok:
                         dropped += 1
+                        # say it out loud: "frames arrive but fail the checksum"
+                        # is a completely different fault from "no bytes at all"
+                        print(f"  [drop {dropped}] bad frame: "
+                              + " ".join(f"{b:02x}" for b in [SYNC, cls, margin >> 8 & 0xFF, margin & 0xFF]))
                         continue
                     n += 1
                     now = time.time()

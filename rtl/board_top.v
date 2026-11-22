@@ -57,15 +57,21 @@ module board_top #(
     input  wire aud_lrclk,
     input  wire aud_adcdat,
     output wire aud_scl,
-    inout  wire aud_sda
+    inout  wire aud_sda,
+
+    // ---- LCD (480x272, 24-bit RGB, no DE pin) ------------------------------
+    output wire        lcd_clk,
+    output wire [23:0] lcd_rgb,
+    output wire        lcd_hsync,      // active low
+    output wire        lcd_vsync       // active low
 );
 
     // ---- clocking ----------------------------------------------------------
-    wire clk, rst_n, locked;
+    wire clk, clk_pix, rst_n, locked;
     clk_gen u_clk (
         .clk_p(sys_clk_p), .clk_n(sys_clk_n),
         .rst_async_n(sys_rstn),
-        .clk(clk), .rst_n(rst_n), .locked(locked)
+        .clk(clk), .clk_pix(clk_pix), .rst_n(rst_n), .locked(locked)
     );
 
     // ---- key: debounce (20 ms) + single-shot pulse -------------------------
@@ -83,9 +89,7 @@ module board_top #(
     // ---- recognition mode ---------------------------------------------------
     // Single-shot (default) or continuous, toggled by KEY2.  In continuous mode
     // the next 1 s window starts the moment the accelerator finishes, so the
-    // board recognises non-stop at ~1 Hz: the 0.56 ms of audio lost during the
-    // accelerator run is 0.06% of a window, inaudible, and it needs no extra
-    // memory because the front end only ever keeps one window of history.
+    // board recognises non-stop at ~1 Hz.
     reg free_run;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n)              free_run <= (FREE_RUN_DEFAULT != 0);
@@ -210,12 +214,60 @@ module board_top #(
         end
     end
 
+    reg  [3:0]  class_q;        // last classification, latched on act_done
+
+    // =========================================================================
+    // LCD: show the recognised word for 1 s (silence/unknown are not shown)
+    // =========================================================================
+    // word_to_text module does the hold timer in the pixel domain
+    reg         word_tog;
+    always @(posedge clk or negedge rst_n)
+        if (!rst_n)              word_tog <= 1'b0;
+        else if (act_done)       word_tog <= ~word_tog;
+
+    wire        word_show;
+    wire [47:0] word_text;
+
+    // ---- pixel domain (12.5 MHz) -------------------------------------------
+    wire pix_rst_n;
+    reg  [1:0] pix_rst;
+    always @(posedge clk_pix or negedge rst_n)
+        if (!rst_n) pix_rst <= 2'b00;
+        else        pix_rst <= {pix_rst[0], 1'b1};
+    assign pix_rst_n = pix_rst[1];
+
+    wire [9:0]  pix_x;
+    wire [8:0]  pix_y;
+    wire [23:0] fg_rgb;
+    wire [23:0] bg_rgb = 24'h101828;          // dark slate background
+
+    wire [23:0] lcd_rgb_rgb;
+    lcd_timing u_lcd (
+        .clk(clk_pix), .rst_n(pix_rst_n),
+        .rgb_in(fg_rgb), .rgb_out(lcd_rgb_rgb),
+        .hsync(lcd_hsync), .vsync(lcd_vsync), .de(),
+        .x(pix_x), .y(pix_y), .sof());
+
+    word_to_text #(.HOLD_CYC(12_500_000)) u_word (
+        .clk(clk_pix), .rst_n(pix_rst_n),
+        .tog(word_tog), .class_i(class_q),
+        .show(word_show), .text(word_text));
+
+    text_overlay u_text (
+        .clk(clk_pix), .x(pix_x), .y(pix_y),
+        .show(word_show), .text(word_text),
+        .rgb_in(bg_rgb), .rgb_out(fg_rgb));
+
+    // The panel is wired BGR (noted in Sonic-Speed-Parallelism/rtl/top.v)
+    assign lcd_rgb = {lcd_rgb_rgb[7:0], lcd_rgb_rgb[15:8], lcd_rgb_rgb[23:16]};
+
+    assign lcd_clk = clk_pix;
+
     // ---- UART_TX FSM -------------------------------------------------------
     // Report = 5 bytes: 0xA5, class, margin_hi, margin_lo, checksum.
     // The margin is a signed INT16 logit difference; sending only its low byte
     // (as the first draft did) wrapped at 255 and turned negatives into large
     // positives.  The checksum lets the host drop mis-framed reports.
-    reg  [3:0]  class_q;
     reg  [15:0] margin_q;
     reg  [7:0]  csum_q;
     wire [7:0]  cls_b = {4'h0, class_q};

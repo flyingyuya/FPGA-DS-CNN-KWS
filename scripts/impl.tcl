@@ -44,6 +44,8 @@ read_verilog [list \
     rtl/preprocessing/dct40.v \
     rtl/preprocessing/mfcc_roms.v \
     rtl/preprocessing/mfcc_top.v \
+    rtl/lcd/lcd_timing.v rtl/lcd/font_rom.v \
+    rtl/lcd/text_overlay.v rtl/lcd/word_to_text.v \
 ]
 read_xdc constrs/pa_starlite.xdc
 
