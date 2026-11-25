@@ -2,7 +2,7 @@
 // tb_mfcc_top.v -- end-to-end MFCC front end.
 //
 // Feeds one second of 16 kHz PCM (preloaded into the sample buffer) and compares
-// the 40 x 101 UINT8 map with the composed integer reference model
+// the 20 x 101 UINT8 map with the composed integer reference model
 // (scripts/golden/mfcc_ref.py).  Mismatches are reported as a histogram by
 // absolute difference, because "everything is off by exactly 1" and "some codes
 // are wildly wrong" are very different failures.

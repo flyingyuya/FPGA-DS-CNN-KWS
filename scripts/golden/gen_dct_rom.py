@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the 40x40 DCT-II coefficient ROM and the golden DCT vectors.
+"""Generate the NxN DCT-II coefficient ROM and the golden DCT vectors.
 
 Coefficients: Q1.15 two's complement, one 16-bit word per line, row-major
-(address = c*40 + k), so the engine walks one output coefficient at a time.
+(address = c*N + k), so the engine walks one output coefficient at a time.
 
 The RTL accumulates the *unshifted* products (Q1.15 x Q8.8 = Q9.23) in a 40-bit
 accumulator and rounds once at the end:

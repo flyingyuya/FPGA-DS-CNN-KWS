@@ -68,8 +68,8 @@ run_log() {
 }
 
 run_dct() {
-    echo "=== tb_dct40 ==="
-    iverilog "${iverilog_flags[@]}" rtl/preprocessing/dct40.v sim/tb/tb_dct40.v
+    echo "=== tb_dct ==="
+    iverilog "${iverilog_flags[@]}" rtl/preprocessing/dct.v sim/tb/tb_dct.v
     vvp sim/build/tb.vvp
 }
 
@@ -93,7 +93,7 @@ board_src=(-DSIM -I rtl -I rtl/cnn -I rtl/memory -I rtl/common
            rtl/preprocessing/fft_butterfly.v rtl/preprocessing/fft_twiddle_rom.v
            rtl/preprocessing/mel_fb.v rtl/preprocessing/mel_rom.v
            rtl/preprocessing/log_q8.v rtl/preprocessing/log_lut.v
-           rtl/preprocessing/dct40.v rtl/preprocessing/mfcc_roms.v
+           rtl/preprocessing/dct.v rtl/preprocessing/mfcc_roms.v
            rtl/preprocessing/mfcc_top.v
            rtl/cnn/accelerator_top.v rtl/cnn/layer_cfg.v rtl/cnn/mac_lane.v
            rtl/cnn/pe_array.v rtl/cnn/conv_engine.v rtl/cnn/argmax_tree.v
@@ -153,7 +153,7 @@ case "${1:-all}" in
     word) iverilog -g2005 -o /tmp/tb_word_to_text.vvp sim/tb/tb_word_to_text.v rtl/lcd/word_to_text.v
         vvp /tmp/tb_word_to_text.vvp | grep -E "PASS|FAIL" ;;
 
-  i2s)   run_i2s ;;
+    i2s)   run_i2s ;;
     mfcc)  run_mfcc ;;
     all)   run_pe; run_conv; run_top; run_fft; run_mel; run_log; run_dct; run_i2s; run_wm; run_mfcc ;;
     *)   echo "usage: bash sim/run.sh [all|pe|conv|top|fft|mel|log|dct|word|i2s|mfcc]   (tb_*.v live in sim/)"; exit 1 ;;

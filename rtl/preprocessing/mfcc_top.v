@@ -8,7 +8,7 @@
 //     -> fft_core (512 points)  -> 256 power bins, Q2.46
 //     -> mel_fb                 -> NNORM mel energies
 //     -> log_q8                 -> NNORM logs, Q8.8
-//     -> dct40                  -> NNORM DCT coefficients, Q9.8
+//     -> dct                    -> NNORM DCT coefficients, Q9.8
 //     -> code = clamp((A[c]*dct + B[c] + 2^19) >> 20, 0, 255)
 //     -> FMEM[c*NFRAME + f]
 //
@@ -202,7 +202,7 @@ module mfcc_top #(
     wire [5:0]         dct_idx;
     wire signed [23:0] dct_data;
 
-    dct40 u_dct (
+    dct u_dct (
         .clk(clk), .rst_n(rst_n),
         .log_we(dct_log_we), .log_addr(dct_log_addr), .log_data(log_data),
         .start(dct_start), .busy(dct_busy), .done(dct_done),

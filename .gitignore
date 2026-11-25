@@ -20,7 +20,8 @@ software/artifacts/
 # xsim
 sim/build/
 
-docs/
+docs/refactor-plan.md
+docs/paper/
 
 # Vivado 临时文件
 .Xil/

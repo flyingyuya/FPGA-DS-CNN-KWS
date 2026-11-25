@@ -33,8 +33,10 @@ read_verilog [list \
     rtl/preprocessing/fft_butterfly.v rtl/preprocessing/fft_twiddle_rom.v \
     rtl/preprocessing/mel_fb.v rtl/preprocessing/mel_rom.v \
     rtl/preprocessing/log_q8.v rtl/preprocessing/log_lut.v \
-    rtl/preprocessing/dct40.v rtl/preprocessing/mfcc_roms.v \
+    rtl/preprocessing/dct.v rtl/preprocessing/mfcc_roms.v \
     rtl/preprocessing/mfcc_top.v \
+    rtl/lcd/lcd_timing.v rtl/lcd/font_rom.v \
+    rtl/lcd/word_to_text.v rtl/lcd/text_overlay.v \
 ]
 read_xdc constrs/pa_starlite.xdc
 

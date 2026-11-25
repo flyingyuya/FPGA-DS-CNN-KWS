@@ -41,7 +41,7 @@ read_verilog [list \
     rtl/preprocessing/mel_rom.v \
     rtl/preprocessing/log_q8.v \
     rtl/preprocessing/log_lut.v \
-    rtl/preprocessing/dct40.v \
+    rtl/preprocessing/dct.v \
     rtl/preprocessing/mfcc_roms.v \
     rtl/preprocessing/mfcc_top.v \
     rtl/lcd/lcd_timing.v rtl/lcd/font_rom.v \

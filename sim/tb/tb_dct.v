@@ -1,7 +1,7 @@
 // =============================================================================
-// tb_dct40.v -- 40x40 DCT-II unit test, bit-exact against the integer model.
+// tb_dct.v -- NxN DCT-II unit test, bit-exact against the integer model.
 //
-// Feeds the log-mel vectors produced by gen_log_lut.py and compares the 40 DCT
+// Feeds the log-mel vectors produced by gen_log_lut.py and compares the N DCT
 // coefficients with gen_dct_rom.py's model, which uses the same coefficient ROM
 // and the same rounding (accumulate, then one rounded shift by 15).
 //
@@ -10,7 +10,7 @@
 `timescale 1ns / 1ps
 `include "kws_params.vh"
 
-module tb_dct40;
+module tb_dct;
 
     localparam integer N     = `KWS_H_IN;   // N_MFCC == N_MELS
     localparam integer NVEC  = 6;
@@ -30,7 +30,7 @@ module tb_dct40;
     wire [5:0]        dct_idx;
     wire signed [DBITS-1:0] dct_data;
 
-    dct40 #(.N(N), .DCT_BITS(DBITS)) u_dct (
+    dct #(.N(N), .DCT_BITS(DBITS)) u_dct (
         .clk(clk), .rst_n(rst_n),
         .log_we(log_we), .log_addr(log_addr), .log_data(log_data),
         .start(start), .busy(busy), .done(done),
@@ -99,16 +99,16 @@ module tb_dct40;
         names[3] = "noise";    names[4] = "max_pos";  names[5] = "max_neg";
         if ($test$plusargs("vcd")) begin
             $dumpfile("sim/build/tb_dct.vcd");
-            $dumpvars(0, tb_dct40);
+            $dumpvars(0, tb_dct);
         end
         repeat (3) @(negedge clk);
         rst_n = 1'b1;
         @(negedge clk);
         for (v = 0; v < NVEC; v = v + 1) run_vector(v);
         if (errors == 0)
-            $display("DCT40: %0d vectors x %0d coefficients bit-exact", NVEC, N);
+            $display("DCT: %0d vectors x %0d coefficients bit-exact", NVEC, N);
         else
-            $display("DCT40: %0d mismatches", errors);
+            $display("DCT: %0d mismatches", errors);
         $finish;
     end
 

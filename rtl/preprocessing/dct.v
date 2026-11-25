@@ -1,5 +1,5 @@
 // =============================================================================
-// dct40.v -- 40x40 DCT-II over the log-mel vector, one multiplier, time shared.
+// dct.v -- NxN DCT-II over the log-mel vector, one multiplier, time shared.
 //
 //     for c in 0..39:                      # output coefficient
 //         acc = 0
@@ -7,8 +7,8 @@
 //         dct[c] = (acc + 2^14) >>> 15     # Q9.8
 //
 // 1600 MACs at two cycles each (address, then data) = ~3,200 cycles = 67 us per
-// frame, i.e. 0.7 % of the 10 ms hop.  There is no reason to spend 40 multipliers
-// on a 40x40 matrix that runs once per frame, and one multiplier cannot get the
+// frame, i.e. 0.7 % of the 10 ms hop.  There is no reason to spend N multipliers
+// on a NxN matrix that runs once per frame, and one multiplier cannot get the
 // address/data alignment wrong.
 //
 // Formats
@@ -24,7 +24,7 @@
 `timescale 1ns / 1ps
 `include "kws_params.vh"
 
-module dct40 #(
+module dct #(
     parameter integer N        = `KWS_H_IN,   // N_MFCC == N_MELS
     parameter integer LOG_FRAC = 8,
     parameter integer DCT_BITS = 24,
