@@ -148,7 +148,7 @@ report_utilization -hierarchical                   # 只要物理数量就用这
 
 ![](docs/assets/system-architecture.png)
 
-加速器架构设计
+加速器（accelerator_top）架构设计
 
 ![](docs/assets/accelerator-architecture.png)
 
@@ -218,7 +218,7 @@ sudo pacman -S --needed iverilog uv git
 iverilog -V | head -1
 ```
 
-其他发行版请自行参考对应的安装方法。接着克隆到本地并安装 Python 虚拟环境（也可以使用系统自带，推荐使用虚拟环境，避免污染系统）：
+其他发行版请自行参考对应的安装方法。接着克隆到本地并安装 Python 虚拟环境（也可以使用系统自带，推荐使用虚拟环境，避免污染系统环境）：
 
 ```shell
 git clone https://github.com/flyingyuya/FPGA-DS-CNN-KWS.git
@@ -510,7 +510,7 @@ s_ready = (wcnt < NSAMP) && (wcnt < need + SLACK)   // SLACK = RING - WIN = 32
 
 ## 9. 已知限制与后续工作
 
-- 目前识别速度是 1 帧/s（无输入帧缓冲），若要做 200–250 ms 滑窗，需要`加窗重叠 + FMEM 环形列地址`，但同时也会增加 BRAM 存储资源。
+- 目前识别速度是 1 帧/s（无输入帧缓冲），若要做 200–250 ms 滑窗，需要`加窗重叠 + FMEM 环形列地址`，但同时也会增加 BRAM 资源消耗。
 - 连续模式下每次 CNN 运行（0.563 ms）期间不采样本，占一帧的 0.06%，几乎可忽略。
 - 当前在 12 类任务上的量化精度为 93.37%。
 
@@ -525,7 +525,6 @@ s_ready = (wcnt < NSAMP) && (wcnt < need + SLACK)   // SLACK = RING - WIN = 32
 | `docs/quantisation-math.md` | shift-only 量化契约的完整推导（含 ρ、zero-point、舍入） |
 | `docs/memory-layout.md` | 每层特征图/权重的地址映射 |
 | `docs/bringup.md` | 上板指南：引脚表、LED 真值表、flash 陷阱、按键说明 |
-| `docs/paper/` | 对比用的两篇参考文献 |
 
 ---
 
